@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Play, Pause, RotateCcw, Volume2, VolumeX, Copy, Users, WifiOff, XCircle, Activity, ChevronRight, RefreshCw } from 'lucide-react';
+import { Play, Pause, RotateCcw, Volume2, VolumeX, Copy, Users, WifiOff, XCircle, Activity, ChevronRight, RefreshCw, AlertTriangle } from 'lucide-react';
 import { generateLotoRhyme } from '../services/geminiService';
 import { Language, NetworkPayload, ChatMessage, PlayerInfo } from '../types';
 import Peer, { DataConnection } from 'peerjs';
@@ -12,6 +12,18 @@ interface GameHostProps {
 type TabType = 'BOARD' | 'PLAYERS' | 'LOG';
 
 const APP_PREFIX = 'LOTOMASTER-';
+
+// Robust Peer Configuration with Google STUN servers
+const PEER_CONFIG = {
+  debug: 2,
+  config: {
+    iceServers: [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'stun:stun2.l.google.com:19302' },
+    ]
+  }
+};
 
 // Helper to generate a random 6-char code
 const generateShortCode = () => Math.random().toString(36).substring(2, 8).toUpperCase();
@@ -96,7 +108,15 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
       } catch (err) { console.warn('Wake Lock error:', err); }
     };
     requestWakeLock();
-    return () => { if (wakeLockRef.current) wakeLockRef.current.release(); };
+    // Re-acquire wake lock on visibility change
+    const handleVisibilityChange = async () => {
+        if (document.visibilityState === 'visible') requestWakeLock();
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => { 
+        if (wakeLockRef.current) wakeLockRef.current.release(); 
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, []);
 
   // Initialize PeerJS
@@ -115,31 +135,35 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
       const fullId = `${APP_PREFIX}${code}`;
 
       try {
-        peer = new Peer(fullId, { debug: 1 });
+        peer = new Peer(fullId, PEER_CONFIG);
         peerRef.current = peer;
 
         peer.on('open', (id) => {
-          // Success! We only show the code part to the user
           setRoomCode(code); 
           const readyMsg = lang === 'vi' ? "Phòng đã sẵn sàng!" : "Room Ready!";
           setCurrentRhyme(readyMsg);
           speak(readyMsg);
           setPeerError(null);
           setIsSignalingLost(false);
+          addLog("Server started. Waiting for players...");
         });
 
         peer.on('connection', (conn) => {
           conn.on('open', () => {
             connectionsRef.current.set(conn.peer, conn);
-            const currentState = stateRef.current;
-            conn.send({
-              type: 'SYNC_STATE',
-              payload: { 
-                  history: currentState.calledNumbers, 
-                  currentNumber: currentState.currentNumber, 
-                  currentRhyme: currentState.currentRhyme 
-              }
-            });
+            
+            // Delay sending state slightly to ensure connection is stable
+            setTimeout(() => {
+                const currentState = stateRef.current;
+                conn.send({
+                type: 'SYNC_STATE',
+                payload: { 
+                    history: currentState.calledNumbers, 
+                    currentNumber: currentState.currentNumber, 
+                    currentRhyme: currentState.currentRhyme 
+                }
+                });
+            }, 500);
           });
 
           conn.on('data', (data: any) => {
@@ -156,15 +180,18 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
                     return [...prev, newPlayer];
                 });
                 addLog(`${newPlayer.name} joined.`);
-                broadcast({
-                    type: 'CHAT_MESSAGE',
-                    payload: {
-                        id: Date.now().toString(),
-                        sender: 'System',
-                        text: `${newPlayer.name} joined!`,
-                        isSystem: true
-                    }
-                });
+                // Broadcast welcome message
+                setTimeout(() => {
+                     broadcast({
+                        type: 'CHAT_MESSAGE',
+                        payload: {
+                            id: Date.now().toString(),
+                            sender: 'System',
+                            text: `${newPlayer.name} joined!`,
+                            isSystem: true
+                        }
+                    });
+                }, 100);
             }
             if (action.type === 'CLAIM_BINGO') {
                 const currentPlayers = stateRef.current.players;
@@ -186,7 +213,11 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
 
         peer.on('disconnected', () => {
             setIsSignalingLost(true);
-            if (peer && !peer.destroyed) peer.reconnect();
+            addLog("Signaling lost. Reconnecting...");
+            // Try to reconnect immediately
+            if (peer && !peer.destroyed) {
+                peer.reconnect();
+            }
         });
 
         peer.on('error', (err: any) => {
@@ -200,7 +231,7 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
 
             if (err.type === 'network' || err.message?.includes('Lost connection')) {
                  setIsSignalingLost(true);
-                 setTimeout(() => { if (peer && !peer.destroyed) peer.reconnect(); }, 2000);
+                 addLog("Network error. Checking connection...");
                  return;
             }
             if (!roomCode) setPeerError("Connection Error: " + err.type);
@@ -331,7 +362,12 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
                 )}
                 <button onClick={copyToClipboard} className="hover:text-white p-1"><Copy size={14}/></button>
             </div>
-             {isSignalingLost && <WifiOff size={16} className="text-red-500 animate-pulse" />}
+             {isSignalingLost && (
+                 <div className="flex items-center text-xs text-red-500 animate-pulse bg-red-900/20 px-2 py-1 rounded">
+                     <WifiOff size={14} className="mr-1" />
+                     Lost Signal
+                 </div>
+             )}
         </div>
 
         <div className="flex gap-2 items-center">
@@ -393,6 +429,10 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
                         {isAuto ? <><Pause fill="currentColor"/> STOP</> : <><Play fill="currentColor"/> QUAY</>}
                        </button>
                    </div>
+                   <p className="text-[10px] text-slate-500 mt-2 flex items-center gap-1">
+                      <AlertTriangle size={10} /> 
+                      {lang === 'vi' ? 'Hãy giữ màn hình sáng để game không bị ngắt' : 'Keep screen active to avoid disconnection'}
+                   </p>
                </div>
            </div>
         </section>

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { TicketData, NetworkPayload, ChatMessage } from '../types';
 import { TicketView } from './TicketView';
 import { ChatOverlay } from './ChatOverlay';
-import { Volume2, VolumeX, Trophy, Link, Loader, WifiOff, MessageCircle, Grid3X3, LogOut, AlertTriangle } from 'lucide-react';
+import { Volume2, VolumeX, Trophy, Link, Loader, WifiOff, MessageCircle, Grid3X3, LogOut, AlertTriangle, RefreshCw } from 'lucide-react';
 import Peer, { DataConnection } from 'peerjs';
 
 interface GamePlayerProps {
@@ -12,6 +12,18 @@ interface GamePlayerProps {
 
 type MobileTab = 'TICKET' | 'CHAT';
 const APP_PREFIX = 'LOTOMASTER-';
+
+// Robust Peer Configuration with Google STUN servers
+const PEER_CONFIG = {
+  debug: 2,
+  config: {
+    iceServers: [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'stun:stun2.l.google.com:19302' },
+    ]
+  }
+};
 
 // Generate a valid 9x3 Vietnamese Loto Ticket
 const generateTicket = (): TicketData => {
@@ -114,8 +126,9 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
       e.preventDefault();
       if (!roomCode || !playerName) return;
       setIsConnecting(true);
+      setConnectionLost(false);
 
-      const peer = new Peer();
+      const peer = new Peer(PEER_CONFIG);
       peerRef.current = peer;
 
       peer.on('open', (id) => {
@@ -174,30 +187,31 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
           });
 
           conn.on('close', () => {
-              setConnectionLost(true);
-              setIsConnected(false);
-              alert('Host disconnected');
+              if (isConnected) {
+                  setConnectionLost(true);
+                  setIsConnected(false);
+              }
           });
           
           conn.on('error', (err) => {
-              setIsConnecting(false);
-              // Silent retry logic could go here, but alerting user is safer for now
-              if (!isConnected) console.log('Connection failed:', err);
+              console.log('Conn Error:', err);
           });
       });
 
       peer.on('error', (err: any) => {
+          console.error("Peer Error:", err);
           if (err.type === 'peer-unavailable') {
               alert(lang === 'vi' ? 'Không tìm thấy phòng này! Kiểm tra lại mã số.' : 'Room Code not found!');
               setIsConnecting(false);
               return;
           }
           if (err.type === 'network' || err.message?.includes('Lost connection')) {
-              if (isConnected) return;
+              // Wait and retry is handled by user action for now
+              return;
           }
           if (!isConnected) {
               setIsConnecting(false);
-              alert('Lỗi kết nối. Hãy đảm bảo bạn và Host dùng cùng mạng Wifi nếu có thể.');
+              alert(lang === 'vi' ? 'Lỗi kết nối. Vui lòng thử lại.' : 'Connection failed. Please retry.');
           }
       });
   };
@@ -270,6 +284,14 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
                   <h2 className="text-2xl font-bold text-white mb-6 text-center text-transparent bg-clip-text bg-gradient-to-r from-green-400 to-blue-500">
                       {lang === 'vi' ? 'Tham Gia Phòng Chơi' : 'Join Game Room'}
                   </h2>
+                  
+                  {connectionLost && (
+                     <div className="bg-red-500/20 text-red-300 p-3 rounded-lg mb-4 text-sm flex items-center gap-2 border border-red-500/30">
+                         <WifiOff size={16} />
+                         {lang === 'vi' ? 'Mất kết nối với Host. Vui lòng vào lại.' : 'Connection lost. Please rejoin.'}
+                     </div>
+                  )}
+
                   <form onSubmit={handleJoin} className="space-y-4">
                       <div>
                           <label className="text-slate-400 text-sm mb-1 block font-bold">Tên hiển thị (Name)</label>
@@ -287,7 +309,7 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
                           />
                           <p className="text-xs text-slate-500 mt-2 text-center flex items-center justify-center gap-1">
                              <AlertTriangle size={12} />
-                             Nên dùng cùng Wifi với Host để kết nối tốt nhất.
+                             Nên dùng cùng Wifi hoặc 4G ổn định.
                           </p>
                       </div>
                       <button disabled={isConnecting} className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-bold py-4 rounded-xl transition-all flex justify-center items-center gap-2 shadow-lg transform active:scale-95">
@@ -335,6 +357,13 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
                     Thoát
                 </button>
             </div>
+         )}
+         
+         {/* Connection Lost Overlay for In-Game */}
+         {connectionLost && (
+             <div className="absolute top-0 left-0 right-0 z-40 bg-red-600 text-white text-center text-xs py-1 animate-pulse font-bold">
+                 ⚠️ Mất kết nối. Đang thử kết nối lại... (Reconnecting...)
+             </div>
          )}
 
          {/* MAIN GAME AREA (Responsive: Hidden on Mobile if Chat tab is active) */}
