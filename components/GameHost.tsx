@@ -65,17 +65,33 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
     set(roomRef, { status: 'ACTIVE', currentNumber: null, currentRhyme: "Chào mừng quý vị!", history: [], createdAt: Date.now() });
     onDisconnect(roomRef).update({ status: 'HOST_DISCONNECTED' });
     const playersRef = ref(database, `rooms/${code}/players`);
+    
     const u1 = onValue(playersRef, (snap) => {
-        const pList = Object.values(snap.val() || {}) as PlayerInfo[];
+        const rawData = snap.val();
+        if (!rawData) {
+            setPlayers([]);
+            setWinners([]);
+            setWaiters([]);
+            return;
+        }
+
+        // --- FIX: Filter out incomplete player data (ghost keys) ---
+        const pList = Object.values(rawData)
+            .filter((p: any) => p && p.name && typeof p.name === 'string' && p.name.trim() !== '')
+            .map((p: any) => p as PlayerInfo);
+            
         setPlayers(pList);
+        
         const currentWinners = pList.filter(p => p.remaining === 0);
         const currentWaiters = pList.filter(p => p.remaining === 1);
         setWinners(currentWinners);
         setWaiters(currentWaiters);
+        
         if (currentWinners.length > 0) setIsAuto(false);
         if (currentWaiters.length > prevWaitersCount.current) speakSimple("Căng rồi! Có người đang chờ đặc biệt!");
         prevWaitersCount.current = currentWaiters.length;
     });
+
     const claimsRef = ref(database, `rooms/${code}/claims`);
     const u2 = onValue(claimsRef, (snap) => {
         const claims = Object.values(snap.val() || {}) as any[];
