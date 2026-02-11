@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { TicketData, NetworkPayload, ChatMessage } from '../types';
+import { TicketData, ChatMessage } from '../types';
 import { TicketView } from './TicketView';
 import { ChatOverlay } from './ChatOverlay';
-import { Volume2, VolumeX, Trophy, Link, Loader, WifiOff, MessageCircle, Grid3X3, LogOut, AlertTriangle, RefreshCw } from 'lucide-react';
-import Peer, { DataConnection } from 'peerjs';
+import { Volume2, VolumeX, Trophy, Link, Loader, WifiOff, MessageCircle, Grid3X3, LogOut, AlertTriangle, Database } from 'lucide-react';
+import { database, isFirebaseConfigured } from '../services/firebase';
+import { ref, set, onValue, push, onDisconnect, get, remove } from "firebase/database";
 
 interface GamePlayerProps {
   onExit: () => void;
@@ -11,19 +12,6 @@ interface GamePlayerProps {
 }
 
 type MobileTab = 'TICKET' | 'CHAT';
-const APP_PREFIX = 'LOTOMASTER-';
-
-// Robust Peer Configuration with Google STUN servers
-const PEER_CONFIG = {
-  debug: 2,
-  config: {
-    iceServers: [
-      { urls: 'stun:stun.l.google.com:19302' },
-      { urls: 'stun:stun1.l.google.com:19302' },
-      { urls: 'stun:stun2.l.google.com:19302' },
-    ]
-  }
-};
 
 // Generate a valid 9x3 Vietnamese Loto Ticket
 const generateTicket = (): TicketData => {
@@ -66,9 +54,8 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
   const [isConnecting, setIsConnecting] = useState(false);
   const [playerName, setPlayerName] = useState('');
   const [connectionLost, setConnectionLost] = useState(false);
+  const [playerId, setPlayerId] = useState<string | null>(null);
   
-  const connRef = useRef<DataConnection | null>(null);
-  const peerRef = useRef<Peer | null>(null);
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
 
   // Game State
@@ -117,115 +104,132 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
     return () => {
       if (wakeLockRef.current) wakeLockRef.current.release();
       document.removeEventListener('visibilitychange', handleVisibilityChange);
-      if (connRef.current) connRef.current.close();
-      if (peerRef.current) peerRef.current.destroy();
     };
   }, [isConnected]);
 
-  const handleJoin = (e: React.FormEvent) => {
+  // Handle Joining Room via Firebase
+  const handleJoin = async (e: React.FormEvent) => {
       e.preventDefault();
       if (!roomCode || !playerName) return;
+      
+      if (!isFirebaseConfigured()) {
+          alert("Chưa cấu hình Firebase! Vui lòng liên hệ Host để kiểm tra code.");
+          return;
+      }
+
       setIsConnecting(true);
       setConnectionLost(false);
 
-      const peer = new Peer(PEER_CONFIG);
-      peerRef.current = peer;
+      const code = roomCode.trim().toUpperCase();
+      const roomRef = ref(database, `rooms/${code}`);
 
-      peer.on('open', (id) => {
-          // Reconstruct the full Host ID using the prefix
-          const fullHostId = `${APP_PREFIX}${roomCode.trim().toUpperCase()}`;
-          const conn = peer.connect(fullHostId, { reliable: true });
-          connRef.current = conn;
-
-          conn.on('open', () => {
-              setIsConnected(true);
+      try {
+          // 1. Check if room exists
+          const snapshot = await get(roomRef);
+          if (!snapshot.exists()) {
+              alert(lang === 'vi' ? "Không tìm thấy phòng này!" : "Room not found!");
               setIsConnecting(false);
-              setConnectionLost(false);
-              // Send Name immediately
-              conn.send({ type: 'PLAYER_JOINED', payload: { name: playerName } });
+              return;
+          }
+
+          // 2. Register Player
+          const playersRef = ref(database, `rooms/${code}/players`);
+          const newPlayerRef = push(playersRef);
+          const newId = newPlayerRef.key as string;
+          setPlayerId(newId);
+
+          await set(newPlayerRef, {
+              id: newId,
+              name: playerName,
+              joinedAt: Date.now()
           });
 
-          conn.on('data', (data: any) => {
-              const action = data as NetworkPayload;
-              switch (action.type) {
-                  case 'CALL_NUMBER':
-                      const num = action.payload.number;
-                      const rhyme = action.payload.rhyme;
-                      setCurrentCall(num);
-                      setCurrentRhyme(rhyme);
-                      setHistory(action.payload.history);
-                      if (num) {
-                        speak(lang === 'vi' ? `Số ${num}` : `Number ${num}`);
-                        if (rhyme) setTimeout(() => speak(rhyme), 1000);
-                      }
-                      break;
-                  case 'SYNC_STATE':
-                      setHistory(action.payload.history);
-                      setCurrentCall(action.payload.currentNumber);
-                      setCurrentRhyme(action.payload.currentRhyme);
-                      break;
-                  case 'CHAT_MESSAGE':
-                      setMessages(prev => [...prev, action.payload]);
-                      // If we are on mobile and not on chat tab, increment badge
-                      if (window.innerWidth < 768) {
-                           setUnreadCount(prev => prev + 1);
-                      }
-                      break;
-                  case 'RESET_GAME':
-                      setHistory([]);
-                      setCurrentCall(null);
-                      setCurrentRhyme('');
+          // Remove player on disconnect
+          onDisconnect(newPlayerRef).remove();
+
+          // 3. Listen to Game State
+          onValue(roomRef, (snap) => {
+              const data = snap.val();
+              if (data) {
+                  // Handle Host Disconnect Status
+                  if (data.status === 'HOST_DISCONNECTED') {
+                      setConnectionLost(true);
+                  } else {
+                      setConnectionLost(false);
+                  }
+
+                  // Sync State
+                  const newHistory = data.history || [];
+                  const newCurrent = data.currentNumber;
+                  const newRhyme = data.currentRhyme;
+
+                  // Detect new call to speak
+                  if (newCurrent !== currentCall && newCurrent !== null) {
+                      speak(lang === 'vi' ? `Số ${newCurrent}` : `Number ${newCurrent}`);
+                      if (newRhyme) setTimeout(() => speak(newRhyme), 1000);
+                  }
+                  
+                  // Reset detection
+                  if (newHistory.length === 0 && history.length > 0) {
+                      setTicket(generateTicket()); // New game, new ticket
                       setBingoStatus('none');
                       setMessages([]);
-                      setTicket(generateTicket());
-                      break;
-                  case 'PLAYER_KICKED':
-                      alert(lang === 'vi' ? "Bạn đã bị Host mời ra khỏi phòng." : "You were kicked by the host.");
-                      onExit();
-                      break;
+                  }
+
+                  setHistory(newHistory);
+                  setCurrentCall(newCurrent);
+                  setCurrentRhyme(newRhyme);
+              } else {
+                  // Room deleted
+                  setIsConnected(false);
+                  alert(lang === 'vi' ? "Phòng đã bị đóng!" : "Room closed!");
               }
           });
 
-          conn.on('close', () => {
-              if (isConnected) {
-                  setConnectionLost(true);
-                  setIsConnected(false);
+          // 4. Listen to Chat
+          const chatRef = ref(database, `rooms/${code}/messages`);
+          onValue(chatRef, (snap) => {
+              const data = snap.val();
+              if (data) {
+                  const msgs = Object.values(data) as ChatMessage[];
+                  // Sort by ID (timestamp)
+                  msgs.sort((a,b) => Number(a.id) - Number(b.id));
+                  setMessages(msgs);
+                  
+                  // Mobile Badge
+                  if (window.innerWidth < 768 && activeTab !== 'CHAT') {
+                      // Simple logic: if length increased
+                      setUnreadCount(prev => prev + 1);
+                  }
+              } else {
+                  setMessages([]);
               }
           });
           
-          conn.on('error', (err) => {
-              console.log('Conn Error:', err);
-          });
-      });
+          setIsConnected(true);
+          setIsConnecting(false);
 
-      peer.on('error', (err: any) => {
-          console.error("Peer Error:", err);
-          if (err.type === 'peer-unavailable') {
-              alert(lang === 'vi' ? 'Không tìm thấy phòng này! Kiểm tra lại mã số.' : 'Room Code not found!');
-              setIsConnecting(false);
-              return;
-          }
-          if (err.type === 'network' || err.message?.includes('Lost connection')) {
-              // Wait and retry is handled by user action for now
-              return;
-          }
-          if (!isConnected) {
-              setIsConnecting(false);
-              alert(lang === 'vi' ? 'Lỗi kết nối. Vui lòng thử lại.' : 'Connection failed. Please retry.');
-          }
-      });
+      } catch (error) {
+          console.error("Join error:", error);
+          alert("Lỗi kết nối Firebase. Thử lại sau.");
+          setIsConnecting(false);
+      }
   };
 
   const handleSendMessage = (text: string) => {
-      if (!connRef.current || !isConnected) return;
+      if (!playerId || !roomCode) return;
+      const code = roomCode.trim().toUpperCase();
+      const chatRef = ref(database, `rooms/${code}/messages`);
+      const newMsgRef = push(chatRef);
+      
       const msg: ChatMessage = {
-          id: Date.now().toString(),
+          id: Date.now().toString(), // Use timestamp for sorting
           sender: playerName,
           text: text,
           avatar: 'bg-indigo-600'
       };
-      setMessages(prev => [...prev, msg]);
-      connRef.current.send({ type: 'CHAT_MESSAGE', payload: msg });
+      
+      set(newMsgRef, msg);
   };
 
   const handleCellClick = (r: number, c: number, val: number) => {
@@ -241,8 +245,14 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
   };
 
   const notifyWin = () => {
-     if(connRef.current) {
-         connRef.current.send({ type: 'CLAIM_BINGO', payload: {} });
+     if (playerId && roomCode) {
+         const code = roomCode.trim().toUpperCase();
+         const claimsRef = ref(database, `rooms/${code}/claims`);
+         push(claimsRef, {
+             playerId: playerId,
+             playerName: playerName,
+             timestamp: Date.now()
+         });
      }
   };
 
@@ -270,7 +280,7 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
     }
   };
 
-  // Reset unread count when switching to chat via effect if needed, but manual handler is better
+  // Reset unread count when switching to chat
   useEffect(() => {
      if(activeTab === 'CHAT') setUnreadCount(0);
   }, [activeTab]);
@@ -292,6 +302,13 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
                      </div>
                   )}
 
+                  {!isFirebaseConfigured() && (
+                      <div className="bg-yellow-500/20 text-yellow-300 p-3 rounded-lg mb-4 text-xs flex items-center gap-2 border border-yellow-500/30">
+                          <Database size={16} />
+                          <span>Chưa cấu hình Firebase. Game sẽ không hoạt động.</span>
+                      </div>
+                  )}
+
                   <form onSubmit={handleJoin} className="space-y-4">
                       <div>
                           <label className="text-slate-400 text-sm mb-1 block font-bold">Tên hiển thị (Name)</label>
@@ -308,11 +325,11 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
                             onChange={e => setRoomCode(e.target.value.toUpperCase())} 
                           />
                           <p className="text-xs text-slate-500 mt-2 text-center flex items-center justify-center gap-1">
-                             <AlertTriangle size={12} />
-                             Nên dùng cùng Wifi hoặc 4G ổn định.
+                             <Database size={12} />
+                             Kết nối an toàn qua Google Firebase
                           </p>
                       </div>
-                      <button disabled={isConnecting} className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-bold py-4 rounded-xl transition-all flex justify-center items-center gap-2 shadow-lg transform active:scale-95">
+                      <button disabled={isConnecting || !isFirebaseConfigured()} className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-bold py-4 rounded-xl transition-all flex justify-center items-center gap-2 shadow-lg transform active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed">
                           {isConnecting ? <Loader className="animate-spin"/> : <Link />}
                           {isConnecting ? 'Đang kết nối...' : (lang === 'vi' ? 'Vào Phòng Ngay' : 'Join Room')}
                       </button>
@@ -328,8 +345,8 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
       {/* Navbar */}
       <nav className="p-3 bg-slate-800 border-b border-slate-700 flex justify-between items-center shadow-lg z-20 shrink-0">
          <div className="flex items-center gap-3">
-            <div className="bg-red-600 text-white font-bold px-3 py-1 rounded text-xs uppercase tracking-wider animate-pulse flex items-center gap-1">
-                <div className="w-2 h-2 bg-white rounded-full"></div> Live
+            <div className="bg-green-600 text-white font-bold px-3 py-1 rounded text-xs uppercase tracking-wider flex items-center gap-1">
+                <div className="w-2 h-2 bg-white rounded-full animate-pulse"></div> DB
             </div>
             {connectionLost && <WifiOff className="text-red-500 animate-pulse" />}
          </div>
@@ -362,7 +379,7 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
          {/* Connection Lost Overlay for In-Game */}
          {connectionLost && (
              <div className="absolute top-0 left-0 right-0 z-40 bg-red-600 text-white text-center text-xs py-1 animate-pulse font-bold">
-                 ⚠️ Mất kết nối. Đang thử kết nối lại... (Reconnecting...)
+                 ⚠️ Host đã mất kết nối... (Host disconnected...)
              </div>
          )}
 

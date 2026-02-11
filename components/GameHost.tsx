@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Play, Pause, RotateCcw, Volume2, VolumeX, Copy, Users, WifiOff, XCircle, Activity, ChevronRight, RefreshCw, AlertTriangle } from 'lucide-react';
+import { Play, Pause, RotateCcw, Volume2, VolumeX, Copy, Users, WifiOff, Activity, ChevronRight, RefreshCw, AlertTriangle, Database } from 'lucide-react';
 import { generateLotoRhyme } from '../services/geminiService';
-import { Language, NetworkPayload, ChatMessage, PlayerInfo } from '../types';
-import Peer, { DataConnection } from 'peerjs';
+import { Language, ChatMessage, PlayerInfo } from '../types';
+import { database, isFirebaseConfigured } from '../services/firebase';
+import { ref, set, onValue, update, push, remove, onDisconnect } from "firebase/database";
 
 interface GameHostProps {
   onExit: () => void;
@@ -12,18 +13,6 @@ interface GameHostProps {
 type TabType = 'BOARD' | 'PLAYERS' | 'LOG';
 
 const APP_PREFIX = 'LOTOMASTER-';
-
-// Robust Peer Configuration with Google STUN servers
-const PEER_CONFIG = {
-  debug: 2,
-  config: {
-    iceServers: [
-      { urls: 'stun:stun.l.google.com:19302' },
-      { urls: 'stun:stun1.l.google.com:19302' },
-      { urls: 'stun:stun2.l.google.com:19302' },
-    ]
-  }
-};
 
 // Helper to generate a random 6-char code
 const generateShortCode = () => Math.random().toString(36).substring(2, 8).toUpperCase();
@@ -60,28 +49,10 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
   const [roomCode, setRoomCode] = useState<string>('');
   const [players, setPlayers] = useState<PlayerInfo[]>([]);
   const [gameLog, setGameLog] = useState<string[]>([]);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [peerError, setPeerError] = useState<string | null>(null);
-  const [isSignalingLost, setIsSignalingLost] = useState(false);
   
-  const peerRef = useRef<Peer | null>(null);
-
-  // Refs for logic
+  // Refs
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const connectionsRef = useRef<Map<string, DataConnection>>(new Map()); 
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
-  
-  // State Refs
-  const stateRef = useRef({
-    calledNumbers,
-    currentNumber,
-    currentRhyme,
-    players
-  });
-
-  useEffect(() => {
-    stateRef.current = { calledNumbers, currentNumber, currentRhyme, players };
-  }, [calledNumbers, currentNumber, currentRhyme, players]);
 
   // TTS Helper
   const speak = (text: string) => {
@@ -98,7 +69,25 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
     setGameLog(prev => [`[${new Date().toLocaleTimeString()}] ${msg}`, ...prev].slice(0, 50));
   };
 
-  // Wake Lock Logic
+  // 1. Check Firebase Config
+  if (!isFirebaseConfigured()) {
+      return (
+          <div className="flex items-center justify-center h-screen bg-slate-900 text-white p-6">
+              <div className="bg-slate-800 p-6 rounded-xl max-w-lg text-center border border-slate-700">
+                  <Database size={48} className="mx-auto text-red-500 mb-4" />
+                  <h2 className="text-2xl font-bold mb-2">Chưa cấu hình Database</h2>
+                  <p className="mb-4 text-slate-300">Để chơi mượt mà và không bị ngắt kết nối, bạn cần điền thông tin Firebase vào code.</p>
+                  <p className="text-sm bg-slate-900 p-2 rounded text-left font-mono text-xs mb-4 overflow-x-auto">
+                      Mở file: <code>services/firebase.ts</code><br/>
+                      Thay thế <code>firebaseConfig</code> bằng thông tin project của bạn.
+                  </p>
+                  <button onClick={onExit} className="bg-indigo-600 px-4 py-2 rounded font-bold">Quay lại</button>
+              </div>
+          </div>
+      );
+  }
+
+  // 2. Wake Lock
   useEffect(() => {
     const requestWakeLock = async () => {
       try {
@@ -108,7 +97,6 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
       } catch (err) { console.warn('Wake Lock error:', err); }
     };
     requestWakeLock();
-    // Re-acquire wake lock on visibility change
     const handleVisibilityChange = async () => {
         if (document.visibilityState === 'visible') requestWakeLock();
     };
@@ -119,153 +107,95 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
     };
   }, []);
 
-  // Initialize PeerJS
+  // 3. Initialize Firebase Room
   useEffect(() => {
-    let peer: Peer;
+    const code = generateShortCode();
+    setRoomCode(code);
+    
+    // Create initial room state in Firebase
+    const roomRef = ref(database, `rooms/${code}`);
+    set(roomRef, {
+        status: 'ACTIVE',
+        currentNumber: null,
+        currentRhyme: lang === 'vi' ? "Phòng đã sẵn sàng!" : "Room Ready!",
+        history: [],
+        createdAt: Date.now()
+    });
 
-    const initPeer = (retryCount = 0) => {
-      if (retryCount > 5) {
-          setPeerError("Không thể tạo phòng. Vui lòng thử lại.");
-          return;
-      }
+    // Clean up room on disconnect (optional - usually better to keep it for reconnect)
+    onDisconnect(roomRef).update({ status: 'HOST_DISCONNECTED' });
 
-      setPeerError(null);
-      // Generate a short code, but prefix it for the server
-      const code = generateShortCode();
-      const fullId = `${APP_PREFIX}${code}`;
+    // Listen for Players
+    const playersRef = ref(database, `rooms/${code}/players`);
+    const unsubscribePlayers = onValue(playersRef, (snapshot) => {
+        const data = snapshot.val();
+        if (data) {
+            const playerList = Object.values(data) as PlayerInfo[];
+            setPlayers(playerList);
+        } else {
+            setPlayers([]);
+        }
+    });
 
-      try {
-        peer = new Peer(fullId, PEER_CONFIG);
-        peerRef.current = peer;
-
-        peer.on('open', (id) => {
-          setRoomCode(code); 
-          const readyMsg = lang === 'vi' ? "Phòng đã sẵn sàng!" : "Room Ready!";
-          setCurrentRhyme(readyMsg);
-          speak(readyMsg);
-          setPeerError(null);
-          setIsSignalingLost(false);
-          addLog("Server started. Waiting for players...");
-        });
-
-        peer.on('connection', (conn) => {
-          conn.on('open', () => {
-            connectionsRef.current.set(conn.peer, conn);
-            
-            // Delay sending state slightly to ensure connection is stable
-            setTimeout(() => {
-                const currentState = stateRef.current;
-                conn.send({
-                type: 'SYNC_STATE',
-                payload: { 
-                    history: currentState.calledNumbers, 
-                    currentNumber: currentState.currentNumber, 
-                    currentRhyme: currentState.currentRhyme 
-                }
-                });
-            }, 500);
-          });
-
-          conn.on('data', (data: any) => {
-            const action = data as NetworkPayload;
-            if (action.type === 'PLAYER_JOINED') {
-                const info = action.payload as { name: string };
-                const newPlayer: PlayerInfo = {
-                    id: conn.peer,
-                    name: info.name || `User ${conn.peer.substr(0,4)}`,
-                    joinedAt: Date.now()
-                };
-                setPlayers(prev => {
-                    if (prev.find(p => p.id === newPlayer.id)) return prev;
-                    return [...prev, newPlayer];
-                });
-                addLog(`${newPlayer.name} joined.`);
-                // Broadcast welcome message
-                setTimeout(() => {
-                     broadcast({
-                        type: 'CHAT_MESSAGE',
-                        payload: {
-                            id: Date.now().toString(),
-                            sender: 'System',
-                            text: `${newPlayer.name} joined!`,
-                            isSystem: true
-                        }
-                    });
-                }, 100);
+    // Listen for Bingo Claims
+    const claimsRef = ref(database, `rooms/${code}/claims`);
+    const unsubscribeClaims = onValue(claimsRef, (snapshot) => {
+        const data = snapshot.val();
+        if (data) {
+            // Get the latest claim
+            const claims = Object.values(data) as any[];
+            const latestClaim = claims[claims.length - 1];
+            if (latestClaim && Date.now() - latestClaim.timestamp < 5000) { // Only recent claims
+                addLog(`BINGO CLAIM: ${latestClaim.playerName}`);
+                speak(`Bingo! ${latestClaim.playerName} kêu Bingo!`);
+                alert(`${latestClaim.playerName} claims BINGO!`);
+                // Remove claim to prevent double alert? 
+                // In real app we might handle this better, but this works for simple notificaiton
             }
-            if (action.type === 'CLAIM_BINGO') {
-                const currentPlayers = stateRef.current.players;
-                const playerName = currentPlayers.find(p => p.id === conn.peer)?.name || 'Unknown';
-                addLog(`WINNER: ${playerName} claims BINGO!`);
-                speak(`Bingo! ${playerName} thắng rồi!`);
-                alert(`${playerName} claims BINGO! Check their ticket!`);
-            }
-            if (action.type === 'CHAT_MESSAGE') {
-                const msg = action.payload as ChatMessage;
-                setMessages(prev => [...prev, msg]);
-                broadcast(action);
-            }
-          });
+        }
+    });
 
-          conn.on('close', () => handleDisconnect(conn.peer));
-          conn.on('error', () => handleDisconnect(conn.peer));
-        });
+    // Listen for Chat messages to log them
+    const chatRef = ref(database, `rooms/${code}/messages`);
+    const unsubscribeChat = onValue(chatRef, (snapshot) => {
+        const data = snapshot.val();
+        if (data) {
+             const msgs = Object.values(data) as ChatMessage[];
+             // Only log the very last message to avoid spamming the log on load
+             // This is a simplified approach. Ideally we track last logged ID.
+             const latestMsg = msgs.sort((a,b) => Number(a.id) - Number(b.id)).pop();
+             if (latestMsg && Number(latestMsg.id) > Date.now() - 2000) {
+                 // Only show messages from the last 2 seconds in the log to avoid history spam
+                 addLog(`${latestMsg.sender}: ${latestMsg.text}`);
+             }
+        }
+    });
 
-        peer.on('disconnected', () => {
-            setIsSignalingLost(true);
-            addLog("Signaling lost. Reconnecting...");
-            // Try to reconnect immediately
-            if (peer && !peer.destroyed) {
-                peer.reconnect();
-            }
-        });
 
-        peer.on('error', (err: any) => {
-            // ID taken? Retry with a new one
-            if (err.type === 'unavailable-id') {
-                console.log("ID collision, retrying...");
-                peer.destroy();
-                initPeer(retryCount + 1);
-                return;
-            }
-
-            if (err.type === 'network' || err.message?.includes('Lost connection')) {
-                 setIsSignalingLost(true);
-                 addLog("Network error. Checking connection...");
-                 return;
-            }
-            if (!roomCode) setPeerError("Connection Error: " + err.type);
-        });
-      } catch (e: any) { setPeerError(e.message); }
-    };
-
-    initPeer();
-
-    const handleDisconnect = (pId: string) => {
-        setPlayers(prev => {
-            const pName = prev.find(p => p.id === pId)?.name;
-            if (pName) addLog(`${pName} disconnected.`);
-            return prev.filter(p => p.id !== pId);
-        });
-        connectionsRef.current.delete(pId);
-    };
-
-    const handleBeforeUnload = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ''; };
-    window.addEventListener('beforeunload', handleBeforeUnload);
+    const readyMsg = lang === 'vi' ? "Phòng đã sẵn sàng!" : "Room Ready!";
+    setCurrentRhyme(readyMsg);
+    speak(readyMsg);
+    addLog("Room created: " + code);
 
     return () => {
-      if (peer) peer.destroy();
-      window.removeEventListener('beforeunload', handleBeforeUnload);
+        unsubscribePlayers();
+        unsubscribeClaims();
+        unsubscribeChat();
+        stopAuto();
+        remove(roomRef); // Clean up DB when host exits explicitly
     };
   }, []); 
 
-  const broadcast = (data: NetworkPayload) => {
-    connectionsRef.current.forEach(conn => {
-        if (conn.open) conn.send(data);
-    });
+  // Game Logic Updates to Firebase
+  const updateGameState = (num: number | null, rhyme: string, hist: number[]) => {
+      if (!roomCode) return;
+      const updates: any = {};
+      updates[`rooms/${roomCode}/currentNumber`] = num;
+      updates[`rooms/${roomCode}/currentRhyme`] = rhyme;
+      updates[`rooms/${roomCode}/history`] = hist;
+      update(ref(database), updates);
   };
 
-  // Game Logic
   const drawNumber = async () => {
     const allNumbers = Array.from({ length: 90 }, (_, i) => i + 1);
     const available = allNumbers.filter(n => !calledNumbers.includes(n));
@@ -275,7 +205,7 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
       const endMsg = lang === 'vi' ? "Hết số rồi!" : "Game Over!";
       setCurrentRhyme(endMsg);
       speak(endMsg);
-      broadcast({ type: 'CALL_NUMBER', payload: { number: null, rhyme: endMsg, history: calledNumbers } });
+      updateGameState(null, endMsg, calledNumbers);
       return;
     }
 
@@ -292,14 +222,7 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
     setCurrentRhyme(rhyme);
     setTimeout(() => speak(rhyme), 800);
 
-    broadcast({
-        type: 'CALL_NUMBER',
-        payload: {
-            number: nextNum,
-            rhyme: rhyme,
-            history: newHistory
-        }
-    });
+    updateGameState(nextNum, rhyme, newHistory);
   };
 
   const startAuto = () => {
@@ -324,20 +247,18 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
     stopAuto();
     setCalledNumbers([]);
     setCurrentNumber(null);
-    setCurrentRhyme(lang === 'vi' ? "Ván mới!" : "New Game!");
+    const msg = lang === 'vi' ? "Ván mới!" : "New Game!";
+    setCurrentRhyme(msg);
     addLog("Game reset.");
-    broadcast({ type: 'RESET_GAME', payload: {} });
-  };
-
-  const kickPlayer = (playerId: string) => {
-      if(!confirm("Kick this player?")) return;
-      const conn = connectionsRef.current.get(playerId);
-      if (conn) {
-          conn.send({ type: 'PLAYER_KICKED', payload: {} });
-          setTimeout(() => conn.close(), 500);
-      }
-      setPlayers(prev => prev.filter(p => p.id !== playerId));
-      addLog(`Kicked player ${playerId}`);
+    updateGameState(null, msg, []);
+    
+    // Clear logs/claims/messages in DB
+    if(roomCode) {
+        const updates: any = {};
+        updates[`rooms/${roomCode}/claims`] = null;
+        updates[`rooms/${roomCode}/messages`] = null;
+        update(ref(database), updates);
+    }
   };
 
   const copyToClipboard = () => {
@@ -362,12 +283,9 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
                 )}
                 <button onClick={copyToClipboard} className="hover:text-white p-1"><Copy size={14}/></button>
             </div>
-             {isSignalingLost && (
-                 <div className="flex items-center text-xs text-red-500 animate-pulse bg-red-900/20 px-2 py-1 rounded">
-                     <WifiOff size={14} className="mr-1" />
-                     Lost Signal
-                 </div>
-             )}
+            <div className="flex items-center gap-1 text-xs text-green-500 bg-green-900/20 px-2 py-1 rounded border border-green-800">
+                <Database size={12} /> Live DB
+            </div>
         </div>
 
         <div className="flex gap-2 items-center">
@@ -429,10 +347,6 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
                         {isAuto ? <><Pause fill="currentColor"/> STOP</> : <><Play fill="currentColor"/> QUAY</>}
                        </button>
                    </div>
-                   <p className="text-[10px] text-slate-500 mt-2 flex items-center gap-1">
-                      <AlertTriangle size={10} /> 
-                      {lang === 'vi' ? 'Hãy giữ màn hình sáng để game không bị ngắt' : 'Keep screen active to avoid disconnection'}
-                   </p>
                </div>
            </div>
         </section>
@@ -505,12 +419,9 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
                                         <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-xs font-bold shadow">{p.name.charAt(0)}</div>
                                         <div>
                                             <div className="font-bold text-sm text-white">{p.name}</div>
-                                            <div className="text-[10px] text-slate-400 font-mono">{p.id.substr(0,6)}...</div>
+                                            <div className="text-[10px] text-slate-400 font-mono">ID: {p.id.substr(0,4)}</div>
                                         </div>
                                     </div>
-                                    <button onClick={() => kickPlayer(p.id)} className="text-slate-500 hover:text-red-400 hover:bg-red-900/30 p-2 rounded transition-all" title="Kick">
-                                        <XCircle size={18} />
-                                    </button>
                                 </div>
                             ))
                         )}
