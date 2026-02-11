@@ -28,6 +28,12 @@ export interface ChatMessage {
   avatar?: string;
 }
 
+export interface PlayerInfo {
+  id: string; // PeerID
+  name: string;
+  joinedAt: number;
+}
+
 export interface GameState {
   currentNumber: number | null;
   history: number[];
@@ -37,7 +43,14 @@ export interface GameState {
 }
 
 // Networking Types
-export type NetworkActionType = 'SYNC_STATE' | 'CALL_NUMBER' | 'CHAT_MESSAGE' | 'RESET_GAME' | 'PLAYER_JOINED';
+export type NetworkActionType = 
+  | 'SYNC_STATE' 
+  | 'CALL_NUMBER' 
+  | 'CHAT_MESSAGE' 
+  | 'RESET_GAME' 
+  | 'PLAYER_JOINED' // Player -> Host: "I am here"
+  | 'PLAYER_KICKED' // Host -> Player: "Get out"
+  | 'CLAIM_BINGO';  // Player -> Host: "I won!"
 
 export interface NetworkPayload {
   type: NetworkActionType;

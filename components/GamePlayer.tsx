@@ -68,14 +68,10 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
   // TTS Helper
   const speak = (text: string) => {
     if (muted || !window.speechSynthesis) return;
-    
-    // Cancel previous speech to avoid backlog
     window.speechSynthesis.cancel();
-
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = lang === 'vi' ? 'vi-VN' : 'en-US';
     utterance.rate = 1.0;
-    
     window.speechSynthesis.speak(utterance);
   };
 
@@ -86,23 +82,13 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
         if ('wakeLock' in navigator) {
           wakeLockRef.current = await navigator.wakeLock.request('screen');
         }
-      } catch (err) {
-        console.warn('Wake Lock error:', err);
-      }
+      } catch (err) { console.warn('Wake Lock error:', err); }
     };
-
-    if (isConnected) {
-        requestWakeLock();
-    }
-
+    if (isConnected) requestWakeLock();
     const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible' && !wakeLockRef.current && isConnected) {
-        requestWakeLock();
-      }
+      if (document.visibilityState === 'visible' && !wakeLockRef.current && isConnected) requestWakeLock();
     };
-
     document.addEventListener('visibilitychange', handleVisibilityChange);
-
     return () => {
       if (wakeLockRef.current) wakeLockRef.current.release();
       document.removeEventListener('visibilitychange', handleVisibilityChange);
@@ -114,37 +100,32 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
   const handleJoin = (e: React.FormEvent) => {
       e.preventDefault();
       if (!roomId || !playerName) return;
-      
       setIsConnecting(true);
 
       const peer = new Peer();
       peerRef.current = peer;
 
       peer.on('open', (id) => {
-          const conn = peer.connect(roomId, {
-              reliable: true
-          });
+          const conn = peer.connect(roomId, { reliable: true });
           connRef.current = conn;
 
           conn.on('open', () => {
               setIsConnected(true);
               setIsConnecting(false);
               setConnectionLost(false);
+              // Send Name immediately
+              conn.send({ type: 'PLAYER_JOINED', payload: { name: playerName } });
           });
 
           conn.on('data', (data: any) => {
               const action = data as NetworkPayload;
-              
               switch (action.type) {
                   case 'CALL_NUMBER':
                       const num = action.payload.number;
                       const rhyme = action.payload.rhyme;
-                      
                       setCurrentCall(num);
                       setCurrentRhyme(rhyme);
                       setHistory(action.payload.history);
-                      
-                      // Speak logic: Number first, then rhyme
                       if (num) {
                         speak(lang === 'vi' ? `Số ${num}` : `Number ${num}`);
                         if (rhyme) setTimeout(() => speak(rhyme), 1000);
@@ -164,45 +145,36 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
                       setCurrentRhyme('');
                       setBingoStatus('none');
                       setMessages([]);
-                      setTicket(generateTicket()); // New ticket for new game
+                      setTicket(generateTicket());
+                      break;
+                  case 'PLAYER_KICKED':
+                      alert(lang === 'vi' ? "Bạn đã bị Host mời ra khỏi phòng." : "You were kicked by the host.");
+                      onExit();
                       break;
               }
           });
 
           conn.on('close', () => {
               setConnectionLost(true);
-              setIsConnected(false); // Go back to login if actually closed
+              setIsConnected(false);
               alert('Host disconnected');
           });
           
           conn.on('error', (err) => {
-              console.error(err);
               setIsConnecting(false);
-              if (!isConnected) {
-                  alert('Connection failed. Check Room ID.');
-              }
+              if (!isConnected) alert('Connection failed.');
           });
       });
 
-      // Handle signaling errors gracefully if possible
       peer.on('error', (err: any) => {
-          console.error("Player Peer Error", err);
-          
           if (err.type === 'peer-unavailable') {
               alert(lang === 'vi' ? 'Không tìm thấy phòng chơi này!' : 'Room ID not found!');
               setIsConnecting(false);
               return;
           }
-
           if (err.type === 'network' || err.message?.includes('Lost connection')) {
-              // If we are already connected to host (via conn), this peer error
-              // refers to the signaling server. We might not care if P2P is active.
-              if (isConnected) {
-                  console.warn("Signaling lost, but game might continue.");
-                  return;
-              }
+              if (isConnected) return;
           }
-          
           if (!isConnected) {
               setIsConnecting(false);
               alert('Could not connect to server.');
@@ -212,22 +184,14 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
 
   const handleSendMessage = (text: string) => {
       if (!connRef.current || !isConnected) return;
-      
       const msg: ChatMessage = {
           id: Date.now().toString(),
           sender: playerName,
           text: text,
           avatar: 'bg-indigo-600'
       };
-      
-      // Optimistic update
       setMessages(prev => [...prev, msg]);
-      
-      // Send to host
-      connRef.current.send({
-          type: 'CHAT_MESSAGE',
-          payload: msg
-      });
+      connRef.current.send({ type: 'CHAT_MESSAGE', payload: msg });
   };
 
   const handleCellClick = (r: number, c: number, val: number) => {
@@ -242,21 +206,33 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
     }
   };
 
+  const notifyWin = () => {
+     if(connRef.current) {
+         connRef.current.send({ type: 'CLAIM_BINGO', payload: {} });
+     }
+  };
+
   const checkWin = (currentTicket: TicketData) => {
+    // Check horizontal lines (standard Loto)
     for (const row of currentTicket) {
       const numbersInRow = row.filter(cell => cell.value !== null);
       if (numbersInRow.length > 0 && numbersInRow.every(cell => cell.marked)) {
-        setBingoStatus('win');
-        setCurrentRhyme("KINH! KINH! KINH! BINGO!!!");
-        speak("BINGO! BINGO!");
-        // Optionally send 'I WON' to host here
+        if (bingoStatus !== 'win') {
+            setBingoStatus('win');
+            setCurrentRhyme("KINH! KINH! KINH! BINGO!!!");
+            speak("BINGO! BINGO!");
+            notifyWin();
+        }
         return;
       }
     }
+    // Full house check (optional)
     const allNumbers = currentTicket.flat().filter(c => c.value !== null);
     if (allNumbers.every(c => c.marked)) {
-        setBingoStatus('win');
-        speak("BINGO! Full House!");
+        if (bingoStatus !== 'win') {
+            setBingoStatus('win');
+            notifyWin();
+        }
     }
   };
 
@@ -270,31 +246,16 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
                   </h2>
                   <form onSubmit={handleJoin} className="space-y-4">
                       <div>
-                          <label className="text-slate-400 text-sm mb-1 block">Your Name</label>
-                          <input 
-                              required
-                              className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none"
-                              placeholder="Nickname..."
-                              value={playerName}
-                              onChange={e => setPlayerName(e.target.value)}
-                          />
+                          <label className="text-slate-400 text-sm mb-1 block">Tên hiển thị / Your Name</label>
+                          <input required className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="Nickname..." value={playerName} onChange={e => setPlayerName(e.target.value)} />
                       </div>
                       <div>
                           <label className="text-slate-400 text-sm mb-1 block">Room ID (From Host)</label>
-                          <input 
-                              required
-                              className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none font-mono"
-                              placeholder="e.g. 5f3d-..."
-                              value={roomId}
-                              onChange={e => setRoomId(e.target.value)}
-                          />
+                          <input required className="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none font-mono" placeholder="e.g. 5f3d-..." value={roomId} onChange={e => setRoomId(e.target.value)} />
                       </div>
-                      <button 
-                          disabled={isConnecting}
-                          className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-4 rounded-xl transition-all flex justify-center items-center gap-2"
-                      >
+                      <button disabled={isConnecting} className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-4 rounded-xl transition-all flex justify-center items-center gap-2">
                           {isConnecting ? <Loader className="animate-spin"/> : <Link />}
-                          {isConnecting ? 'Connecting...' : (lang === 'vi' ? 'Vào Phòng' : 'Join Room')}
+                          {isConnecting ? 'Đang kết nối...' : (lang === 'vi' ? 'Vào Phòng' : 'Join Room')}
                       </button>
                       <button type="button" onClick={onExit} className="w-full text-slate-500 text-sm hover:text-white">Back</button>
                   </form>
@@ -304,17 +265,16 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
   }
 
   return (
-    <div className="flex flex-col h-screen bg-slate-900">
+    <div className="flex flex-col h-screen bg-slate-900 text-white">
       {/* Navbar */}
       <nav className="p-3 bg-slate-800 border-b border-slate-700 flex justify-between items-center shadow-lg z-20">
          <div className="flex items-center gap-3">
-            <div className="bg-red-600 text-white font-bold px-3 py-1 rounded text-sm uppercase tracking-wider animate-pulse">
-                Live
-            </div>
-            <h1 className="text-white font-bold hidden sm:block">Room: {roomId.slice(0,6)}...</h1>
+            <div className="bg-red-600 text-white font-bold px-3 py-1 rounded text-sm uppercase tracking-wider animate-pulse">Live</div>
+            <div className="hidden sm:block text-xs text-slate-400">Room: <span className="text-white font-mono">{roomId.slice(0,6)}...</span></div>
             {connectionLost && <WifiOff className="text-red-500 animate-pulse" />}
          </div>
          <div className="flex items-center gap-4">
+             <div className="text-sm font-bold text-indigo-400">{playerName}</div>
              <button onClick={() => setMuted(!muted)} className="p-2 text-slate-400 hover:text-white rounded-full bg-slate-700">
                  {muted ? <VolumeX size={18} /> : <Volume2 size={18} />}
              </button>
@@ -325,13 +285,14 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
       <div className="flex-1 overflow-hidden flex flex-col md:flex-row relative">
          {/* Confetti / Win Overlay */}
          {bingoStatus === 'win' && (
-            <div className="absolute inset-0 z-50 bg-black/80 flex items-center justify-center flex-col p-4">
+            <div className="absolute inset-0 z-50 bg-black/80 flex items-center justify-center flex-col p-4 animate-in fade-in duration-300">
                 <Trophy size={80} className="text-yellow-400 mb-4 animate-bounce" />
                 <h2 className="text-4xl md:text-6xl font-black text-white text-center mb-4 text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 via-red-500 to-pink-500">
                     BINGO!
                 </h2>
+                <p className="text-white mb-6">Bạn đã thắng! Chờ Host kiểm tra vé nhé.</p>
                 <button onClick={onExit} className="bg-white text-red-600 px-8 py-3 rounded-full font-bold hover:bg-gray-100">
-                    Exit
+                    Thoát
                 </button>
             </div>
          )}
@@ -340,59 +301,42 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
          <div className="flex-1 p-4 overflow-y-auto flex flex-col items-center gap-6">
             
             {/* Current Call Display */}
-            <div className="w-full max-w-2xl bg-gradient-to-r from-indigo-900 to-slate-900 rounded-2xl p-6 shadow-2xl border border-slate-700 flex items-center gap-6 relative overflow-hidden">
-                <div className="absolute -right-10 -top-10 w-40 h-40 bg-purple-500/20 rounded-full blur-3xl"></div>
-                
+            <div className="w-full max-w-xl bg-gradient-to-r from-indigo-900 to-slate-900 rounded-2xl p-4 shadow-xl border border-slate-700 flex items-center gap-4 relative overflow-hidden">
                 <div className="relative shrink-0">
-                    <div className="w-24 h-24 rounded-full bg-red-600 flex items-center justify-center border-4 border-yellow-400 shadow-lg">
-                        <span className="text-4xl font-black text-white">
-                            {currentCall || '--'}
-                        </span>
+                    <div className="w-20 h-20 rounded-full bg-red-600 flex items-center justify-center border-4 border-yellow-400 shadow-lg">
+                        <span className="text-4xl font-black text-white">{currentCall || '--'}</span>
                     </div>
                 </div>
-                
-                <div className="flex-1 z-10">
-                    <p className="text-indigo-300 text-xs font-bold uppercase tracking-widest mb-1">
+                <div className="flex-1 z-10 min-w-0">
+                    <p className="text-indigo-300 text-[10px] font-bold uppercase tracking-widest mb-1">
                         {lang === 'vi' ? 'MC đang hô:' : 'Caller says:'}
                     </p>
-                    <p className="text-white text-lg sm:text-xl font-medium italic">
-                        "{currentRhyme || (lang === 'vi' ? 'Đang chờ số...' : 'Waiting for number...')}"
-                    </p>
+                    <p className="text-white text-lg font-medium italic truncate">"{currentRhyme || '...'}"</p>
                 </div>
             </div>
 
             {/* The Ticket */}
             <div className="w-full">
-                <TicketView 
-                    ticket={ticket} 
-                    interactive={true} 
-                    onCellClick={handleCellClick}
-                />
+                <TicketView ticket={ticket} interactive={true} onCellClick={handleCellClick} />
             </div>
 
-            {/* Recent History (Horizontal Scroll) */}
+            {/* Recent History */}
             <div className="w-full max-w-2xl">
-                <p className="text-slate-400 text-xs mb-2 uppercase font-bold">Lịch sử / History</p>
+                <p className="text-slate-400 text-xs mb-2 uppercase font-bold">Lịch sử</p>
                 <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide mask-fade-right">
                     {history.slice().reverse().map((num, i) => (
                         <div key={i} className={`
                             w-10 h-10 rounded-full flex items-center justify-center shrink-0 text-sm font-bold border
                             ${i === 0 ? 'bg-yellow-400 border-yellow-200 text-black scale-110' : 'bg-slate-800 border-slate-600 text-slate-400'}
-                        `}>
-                            {num}
-                        </div>
+                        `}>{num}</div>
                     ))}
                 </div>
             </div>
          </div>
 
          {/* Right: Chat */}
-         <div className="h-64 md:h-full md:w-80 p-2 shrink-0">
-             <ChatOverlay 
-                messages={messages} 
-                onSendMessage={handleSendMessage}
-                playerName={playerName} 
-             />
+         <div className="h-48 md:h-full md:w-80 p-2 shrink-0 border-t md:border-t-0 md:border-l border-slate-700 bg-slate-900">
+             <ChatOverlay messages={messages} onSendMessage={handleSendMessage} playerName={playerName} />
          </div>
       </div>
     </div>
