@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Play, Pause, RotateCcw, Volume2, VolumeX, Copy, Users, WifiOff, XCircle, Activity, ChevronRight } from 'lucide-react';
+import { Play, Pause, RotateCcw, Volume2, VolumeX, Copy, Users, WifiOff, XCircle, Activity, ChevronRight, RefreshCw } from 'lucide-react';
 import { generateLotoRhyme } from '../services/geminiService';
 import { Language, NetworkPayload, ChatMessage, PlayerInfo } from '../types';
 import Peer, { DataConnection } from 'peerjs';
@@ -11,7 +11,12 @@ interface GameHostProps {
 
 type TabType = 'BOARD' | 'PLAYERS' | 'LOG';
 
-// Helper to get color based on number range (1-10, 11-20, etc.)
+const APP_PREFIX = 'LOTOMASTER-';
+
+// Helper to generate a random 6-char code
+const generateShortCode = () => Math.random().toString(36).substring(2, 8).toUpperCase();
+
+// Helper to get color based on number range
 const getBallColorClass = (num: number) => {
   const range = Math.floor((num - 1) / 10);
   const colors = [
@@ -40,7 +45,7 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
   const [activeTab, setActiveTab] = useState<TabType>('BOARD');
   
   // Network State
-  const [peerId, setPeerId] = useState<string>('');
+  const [roomCode, setRoomCode] = useState<string>('');
   const [players, setPlayers] = useState<PlayerInfo[]>([]);
   const [gameLog, setGameLog] = useState<string[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -98,14 +103,24 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
   useEffect(() => {
     let peer: Peer;
 
-    const initPeer = () => {
+    const initPeer = (retryCount = 0) => {
+      if (retryCount > 5) {
+          setPeerError("Không thể tạo phòng. Vui lòng thử lại.");
+          return;
+      }
+
       setPeerError(null);
+      // Generate a short code, but prefix it for the server
+      const code = generateShortCode();
+      const fullId = `${APP_PREFIX}${code}`;
+
       try {
-        peer = new Peer({ debug: 1 });
+        peer = new Peer(fullId, { debug: 1 });
         peerRef.current = peer;
 
         peer.on('open', (id) => {
-          setPeerId(id);
+          // Success! We only show the code part to the user
+          setRoomCode(code); 
           const readyMsg = lang === 'vi' ? "Phòng đã sẵn sàng!" : "Room Ready!";
           setCurrentRhyme(readyMsg);
           speak(readyMsg);
@@ -175,12 +190,20 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
         });
 
         peer.on('error', (err: any) => {
+            // ID taken? Retry with a new one
+            if (err.type === 'unavailable-id') {
+                console.log("ID collision, retrying...");
+                peer.destroy();
+                initPeer(retryCount + 1);
+                return;
+            }
+
             if (err.type === 'network' || err.message?.includes('Lost connection')) {
                  setIsSignalingLost(true);
                  setTimeout(() => { if (peer && !peer.destroyed) peer.reconnect(); }, 2000);
                  return;
             }
-            if (!peerId) setPeerError("Connection Error");
+            if (!roomCode) setPeerError("Connection Error: " + err.type);
         });
       } catch (e: any) { setPeerError(e.message); }
     };
@@ -287,8 +310,8 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
   };
 
   const copyToClipboard = () => {
-    navigator.clipboard.writeText(peerId);
-    alert('Room ID copied!');
+    navigator.clipboard.writeText(roomCode);
+    alert('Room Code copied!');
   };
 
   return (
@@ -299,10 +322,14 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
             <h1 className="text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-red-500">
             Loto Host
             </h1>
-            <div className="bg-slate-800 px-3 py-1 rounded-full border border-slate-700 flex items-center gap-2">
-                <span className="text-xs text-slate-400">ID:</span>
-                <code className="text-green-400 font-mono font-bold">{peerId || '...'}</code>
-                <button onClick={copyToClipboard} className="hover:text-white"><Copy size={14}/></button>
+            <div className="bg-slate-800 pl-3 pr-2 py-1 rounded-full border border-slate-700 flex items-center gap-2">
+                <span className="text-xs text-slate-400">ROOM:</span>
+                {roomCode ? (
+                    <code className="text-green-400 font-mono font-black text-lg tracking-widest">{roomCode}</code>
+                ) : (
+                    <RefreshCw className="animate-spin text-yellow-500" size={16}/>
+                )}
+                <button onClick={copyToClipboard} className="hover:text-white p-1"><Copy size={14}/></button>
             </div>
              {isSignalingLost && <WifiOff size={16} className="text-red-500 animate-pulse" />}
         </div>
@@ -315,7 +342,7 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
             <RotateCcw size={20} />
           </button>
           <button onClick={() => { if(confirm("Exit?")) onExit(); }} className="px-3 py-1 bg-red-900/50 hover:bg-red-900 text-red-200 text-xs rounded border border-red-800">
-            End Room
+            End
           </button>
         </div>
       </header>
