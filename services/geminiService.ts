@@ -10,42 +10,53 @@ const getAIClient = () => {
 
 export const generateLotoRhyme = async (number: number, lang: Language): Promise<string> => {
   const ai = getAIClient();
-  if (!ai) {
-    return lang === 'vi' 
-      ? `Số ${number}! Cờ ra con mấy, con mấy gì ra...`
-      : `Number ${number}! Check your tickets!`;
-  }
+  
+  // Fallback nhanh nếu không có AI hoặc lỗi
+  const fallback = lang === 'vi' 
+      ? `Số ${number} bà con ơi!` 
+      : `Number ${number}!`;
 
-  // Optimized prompts for TTS and brevity
-  const promptVi = `Bạn là người hô lô tô. Hãy viết 1 câu thơ lục bát hoặc vè ngắn (tối đa 20 từ) để hô số ${number}. Quan trọng: Chỉ trả về nội dung câu thơ, không có lời dẫn, không có dấu ngoặc kép.`;
-  const promptEn = `You are a Bingo caller. Write a very short, funny rhyming couplet (max 15 words) for number ${number}. Return ONLY the text, no quotes.`;
+  if (!ai) return fallback;
+
+  // Optimized prompts for TET HOLIDAY, SPEED and HUMOR
+  const promptVi = `
+    Bạn là MC Lô Tô hội chợ ngày Tết. Hãy hô số ${number}.
+    Yêu cầu tuyệt đối:
+    1. Ngắn gọn (dưới 10 từ).
+    2. Hài hước, vui nhộn hoặc mang không khí Tết (bánh chưng, lì xì, mai đào).
+    3. Chỉ trả về text câu hô, KHÔNG có ngoặc kép.
+    Ví dụ: "Bánh chưng xanh bên dưa hấu đỏ, con số ${number}."
+  `;
+  
+  const promptEn = `Bingo caller for Lunar New Year. Call number ${number}. Short, funny, festive. Max 8 words. No quotes.`;
 
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
       contents: lang === 'vi' ? promptVi : promptEn,
       config: {
-        thinkingConfig: { thinkingBudget: 0 }, // Low latency needed
-        maxOutputTokens: 50,
-        temperature: 1.0, // High creativity
+        thinkingConfig: { thinkingBudget: 0 }, 
+        maxOutputTokens: 30, // Rất ngắn để đọc nhanh
+        temperature: 1.2, // Tăng sáng tạo
       }
     });
 
-    return response.text?.trim().replace(/["']/g, "") || (lang === 'vi' ? `Số ${number}!` : `Number ${number}!`);
+    return response.text?.trim().replace(/["']/g, "") || fallback;
   } catch (error) {
     console.error("Gemini API Error:", error);
-    return lang === 'vi' ? `Số ${number}!` : `Number ${number}!`;
+    return fallback;
   }
 };
 
 export const generateBotChat = async (history: number[]): Promise<string> => {
+  // Bot chat ít hơn để tập trung hiệu năng
   const ai = getAIClient();
-  if (!ai || Math.random() > 0.3) return ""; // Reduce API usage, only chat sometimes
+  if (!ai || Math.random() > 0.2) return ""; 
 
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
-      contents: `We are playing Bingo/Loto. The numbers called are ${history.slice(-5).join(', ')}. Write a very short (5-10 words) chat message from an excited player who is waiting for a specific number or commenting on the game. No quotes.`,
+      contents: `Context: Tet Holiday Bingo. Numbers called: ${history.slice(-3).join(', ')}. Write a 5-word excited chat message from a player waiting for a number. Vietnamese.`,
     });
     return response.text?.trim() || "";
   } catch {
