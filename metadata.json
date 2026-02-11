@@ -1,0 +1,5 @@
+{
+  "name": "LotoMaster AI",
+  "description": "A modern, AI-powered Vietnamese Loto (Bingo) experience. Features real-time host simulation with Gemini-generated rhymes, smart ticket checking, and a vibrant festival atmosphere.",
+  "requestFramePermissions": []
+}
