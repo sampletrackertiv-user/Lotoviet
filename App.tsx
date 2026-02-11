@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { GameMode, Language } from './types';
 import { GameHost } from './components/GameHost';
 import { GamePlayer } from './components/GamePlayer';
-import { Play, Users, Globe, PartyPopper } from 'lucide-react';
+import { Play, Zap, Trophy, Flower } from 'lucide-react';
 
 const App: React.FC = () => {
   const [mode, setMode] = useState<GameMode>('HOME');
@@ -10,73 +10,87 @@ const App: React.FC = () => {
 
   const toggleLang = () => setLang(prev => prev === 'vi' ? 'en' : 'vi');
 
-  if (mode === 'HOST') {
-    return <GameHost onExit={() => setMode('HOME')} lang={lang} />;
-  }
-
-  if (mode === 'PLAYER') {
-    return <GamePlayer onExit={() => setMode('HOME')} lang={lang} />;
-  }
+  if (mode === 'HOST') return <GameHost onExit={() => setMode('HOME')} lang={lang} />;
+  if (mode === 'PLAYER') return <GamePlayer onExit={() => setMode('HOME')} lang={lang} />;
 
   return (
-    <div className="min-h-screen bg-red-900 text-yellow-300 flex flex-col relative overflow-hidden font-sans">
-      {/* Background Decorative Elements for TET */}
-      <div className="absolute top-0 left-0 w-full h-full overflow-hidden z-0 pointer-events-none">
-         {/* Abstract Cherry Blossoms / Apricot Flowers */}
-        <div className="absolute top-[-10%] left-[-10%] w-[400px] h-[400px] bg-yellow-500/20 rounded-full blur-[80px]"></div>
-        <div className="absolute bottom-[-10%] right-[-10%] w-[400px] h-[400px] bg-pink-500/20 rounded-full blur-[80px]"></div>
-        <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-full h-full bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10"></div>
+    <div className="min-h-screen bg-gradient-to-br from-red-600 via-orange-500 to-yellow-500 text-white flex flex-col relative overflow-hidden font-sans selection:bg-yellow-400 selection:text-red-900">
+      
+      {/* Festive Background Patterns */}
+      <div className="absolute inset-0 z-0 pointer-events-none">
+          <div className="absolute top-[-10%] left-[-10%] w-[500px] h-[500px] bg-yellow-400/20 rounded-full blur-[100px]"></div>
+          <div className="absolute bottom-[-10%] right-[-10%] w-[500px] h-[500px] bg-red-800/20 rounded-full blur-[100px]"></div>
+          <div className="absolute inset-0 opacity-10" style={{backgroundImage: 'radial-gradient(#ffffff 1px, transparent 1px)', backgroundSize: '30px 30px'}}></div>
       </div>
 
-      <nav className="relative z-10 p-6 flex justify-between items-center">
-        <div className="font-black text-3xl tracking-tighter text-yellow-400 drop-shadow-md flex items-center gap-2">
-          <PartyPopper /> Loto Tết 2025
+      <nav className="relative z-10 p-8 flex justify-between items-center">
+        <div className="flex items-center gap-2">
+            <div className="w-8 h-8 bg-yellow-400 rounded-lg flex items-center justify-center text-red-700 font-black text-xl shadow-lg transform rotate-3">L</div>
+            <span className="font-bold text-xl tracking-tight text-white drop-shadow-md">LOTO<span className="text-yellow-200">MASTER</span></span>
         </div>
         <button 
           onClick={toggleLang}
-          className="flex items-center gap-2 text-sm font-bold bg-yellow-500/20 hover:bg-yellow-500/40 text-yellow-200 px-4 py-2 rounded-full transition-colors border border-yellow-500/50"
+          className="text-xs font-bold bg-white/10 hover:bg-white/20 px-3 py-1 rounded-full text-white transition-colors uppercase tracking-widest border border-white/20"
         >
-          <Globe size={16} />
           {lang === 'vi' ? 'VN' : 'EN'}
         </button>
       </nav>
 
       <main className="relative z-10 flex-1 flex flex-col items-center justify-center p-6 text-center">
-        <div className="max-w-md w-full space-y-10 animate-fade-in-up">
+        <div className="max-w-xl w-full animate-fade-in-up">
           
-          <div className="space-y-2">
-            <h1 className="text-6xl md:text-8xl font-black text-yellow-400 drop-shadow-xl uppercase">
-              {lang === 'vi' ? 'Lô Tô' : 'Bingo'}
-            </h1>
-            <h2 className="text-2xl md:text-4xl font-bold text-white uppercase tracking-widest">
-              {lang === 'vi' ? 'Hội Chợ Xuân' : 'Tet Festival'}
-            </h2>
+          <div className="mb-10 relative inline-block">
+             <div className="absolute inset-0 bg-yellow-500 blur-3xl opacity-40 rounded-full"></div>
+             <div className="relative flex justify-center gap-4">
+                 <div className="w-20 h-20 bg-white text-red-600 rounded-3xl flex items-center justify-center shadow-xl rotate-[-6deg] z-10 border-4 border-red-50">
+                     <span className="text-5xl font-black">2</span>
+                 </div>
+                 <div className="w-20 h-20 bg-yellow-400 text-red-700 rounded-3xl flex items-center justify-center shadow-xl z-20 border-4 border-yellow-200 scale-110">
+                     <Flower size={48} />
+                 </div>
+                 <div className="w-20 h-20 bg-white text-red-600 rounded-3xl flex items-center justify-center shadow-xl rotate-[6deg] z-10 border-4 border-red-50">
+                     <span className="text-5xl font-black">5</span>
+                 </div>
+             </div>
           </div>
 
-          <div className="flex flex-col gap-4 justify-center w-full">
+          <h1 className="text-6xl md:text-8xl font-black text-white tracking-tighter mb-4 leading-none drop-shadow-xl">
+            {lang === 'vi' ? 'LÔ TÔ' : 'BINGO'}
+            <br/>
+            <span className="text-yellow-200 text-5xl md:text-7xl">ONLINE</span>
+          </h1>
+          
+          <div className="inline-block bg-white/10 backdrop-blur-md px-6 py-2 rounded-full border border-white/20 mb-8">
+             <p className="text-yellow-100 text-sm font-bold uppercase tracking-[0.2em] flex items-center gap-2">
+                <Trophy size={14} className="text-yellow-400"/>
+                {lang === 'vi' ? 'Vui Xuân Đón Lộc' : 'Tet Holiday Special'}
+             </p>
+          </div>
+
+          <div className="flex flex-col sm:flex-row gap-4 justify-center w-full max-w-md mx-auto">
             <button 
               onClick={() => setMode('PLAYER')}
-              className="group relative w-full py-5 bg-yellow-400 hover:bg-yellow-300 text-red-900 rounded-2xl font-black text-2xl shadow-[0_10px_20px_rgba(234,179,8,0.3)] transition-all transform hover:-translate-y-1 active:scale-95"
+              className="flex-1 py-4 px-6 bg-white hover:bg-yellow-50 text-red-600 rounded-xl font-black text-lg transition-all transform hover:-translate-y-1 hover:shadow-2xl flex items-center justify-center gap-2 shadow-lg group"
             >
-              <div className="flex items-center justify-center gap-3">
-                 <Play fill="currentColor" size={28} />
-                 {lang === 'vi' ? 'THAM GIA CHƠI' : 'JOIN GAME'}
-              </div>
+               <Play size={24} fill="currentColor" className="group-hover:text-orange-500 transition-colors" />
+               {lang === 'vi' ? 'THAM GIA' : 'JOIN GAME'}
             </button>
 
             <button 
               onClick={() => setMode('HOST')}
-              className="w-full py-4 bg-red-800 hover:bg-red-700 text-yellow-200 border-2 border-yellow-500/50 rounded-2xl font-bold text-lg shadow-lg transition-all flex items-center justify-center gap-3"
+              className="flex-1 py-4 px-6 bg-red-800/40 hover:bg-red-800/60 text-white border-2 border-red-400/50 rounded-xl font-bold text-lg transition-all flex items-center justify-center gap-2 backdrop-blur-sm"
             >
-              <Users size={24} />
-              {lang === 'vi' ? 'Tạo Phòng (Host)' : 'Create Room'}
+              <Zap size={20} />
+              {lang === 'vi' ? 'TẠO PHÒNG' : 'HOST GAME'}
             </button>
           </div>
         </div>
       </main>
 
-      <footer className="relative z-10 p-4 text-center text-yellow-500/60 text-xs font-bold uppercase tracking-widest">
-        LotoMaster AI © 2025 • Chúc Mừng Năm Mới
+      <footer className="relative z-10 p-6 text-center border-t border-white/10">
+        <p className="text-red-100 text-[10px] font-bold uppercase tracking-[0.2em] opacity-80">
+            LotoMaster AI © 2025 • Chúc Mừng Năm Mới
+        </p>
       </footer>
     </div>
   );
