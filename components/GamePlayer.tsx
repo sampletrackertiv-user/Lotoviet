@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { TicketData, ChatMessage } from '../types';
 import { TicketView } from './TicketView';
 import { ChatOverlay } from './ChatOverlay';
-import { Volume2, VolumeX, Trophy, Loader, MessageCircle, Grid3X3, LogOut, Radio } from 'lucide-react';
+import { Volume2, VolumeX, Trophy, Loader, MessageCircle, Grid3X3, LogOut, Radio, Hand, Wand2 } from 'lucide-react';
 import { database, isFirebaseConfigured, listenToConnectionStatus } from '../services/firebase';
 import { ref, set, onValue, push, onDisconnect, get, update } from "firebase/database";
 
@@ -13,10 +13,11 @@ interface GamePlayerProps {
 
 type MobileTab = 'TICKET' | 'CHAT';
 
-// Generates a set of tickets (9 rows total). 
-// Conceptually this is 3 standard tickets stacked.
+// Generates a set of tickets (15 rows, 4 numbers per row).
 const generateFullTicketSet = (): TicketData => {
-  const TOTAL_ROWS = 9;
+  const TOTAL_ROWS = 15; // 15 hàng
+  const NUMS_PER_ROW = 4; // 4 số 1 hàng
+  
   const ticket: TicketData = Array(TOTAL_ROWS).fill(null).map(() => Array(9).fill({ value: null, marked: false }));
   
   const colRanges = [
@@ -25,53 +26,37 @@ const generateFullTicketSet = (): TicketData => {
     { min: 60, max: 69 }, { min: 70, max: 79 }, { min: 80, max: 90 }
   ];
 
-  // We generate 3 independent tickets (3 rows each) and merge them.
-  for (let t = 0; t < 3; t++) {
-      const startRow = t * 3;
-      const endRow = startRow + 3;
+  // Generate row by row
+  for (let r = 0; r < TOTAL_ROWS; r++) {
+    // Pick 4 random distinct columns indices from 0-8
+    const availableCols = [0,1,2,3,4,5,6,7,8].sort(() => 0.5 - Math.random()).slice(0, NUMS_PER_ROW);
+    
+    availableCols.forEach(c => {
+      const range = colRanges[c];
+      let num = Math.floor(Math.random() * (range.max - range.min + 1)) + range.min;
       
-      // For each sub-ticket (3 rows)
-      for (let r = startRow; r < endRow; r++) {
-        // Pick 5 random columns to fill for this row
-        const availableCols = [0,1,2,3,4,5,6,7,8].sort(() => 0.5 - Math.random()).slice(0, 5); // 5 numbers per row
-        
-        availableCols.forEach(c => {
-          const range = colRanges[c];
-          let num = Math.floor(Math.random() * (range.max - range.min + 1)) + range.min;
-          
-          // Ensure uniqueness in the column for this sub-ticket
-          // (Simple check against previous rows in this sub-ticket block)
-          let unique = false;
-          while(!unique) {
-             unique = true;
-             for(let checkR = startRow; checkR < r; checkR++) {
-                 if (ticket[checkR][c].value === num) unique = false;
-             }
-             if(!unique) num = Math.floor(Math.random() * (range.max - range.min + 1)) + range.min;
-          }
-          ticket[r][c] = { value: num, marked: false };
-        });
+      // Simple uniqueness check within the column for visual diversity
+      // (We allow duplicates in same column across widely separated rows, but try to avoid immediate repetition)
+      // Check previous 2 rows
+      let unique = false;
+      let attempts = 0;
+      while(!unique && attempts < 10) {
+         unique = true;
+         for(let checkR = Math.max(0, r-2); checkR < r; checkR++) {
+             if (ticket[checkR][c].value === num) unique = false;
+         }
+         if(!unique) num = Math.floor(Math.random() * (range.max - range.min + 1)) + range.min;
+         attempts++;
       }
-
-      // Sort columns for aesthetics (traditional Loto style: smallest on top within a ticket)
-      // This is complex for 3 rows, usually we just ensure column order.
-      // Let's do a simple sort per column within the 3-row block
-      for(let c = 0; c < 9; c++) {
-          const vals = [];
-          for(let r = startRow; r < endRow; r++) {
-              if (ticket[r][c].value !== null) vals.push(ticket[r][c].value as number);
-          }
-          vals.sort((a,b) => a-b);
-          let valIdx = 0;
-          for(let r = startRow; r < endRow; r++) {
-              if (ticket[r][c].value !== null) {
-                  ticket[r][c] = { value: vals[valIdx], marked: false };
-                  valIdx++;
-              }
-          }
-      }
+      ticket[r][c] = { value: num, marked: false };
+    });
   }
 
+  // Sort columns slightly to ensure ascending order logic if we were strictly following sheet rules,
+  // but for a continuous list, row-based randomness is fine.
+  // Standard Loto: numbers in a column on a single ticket (3 rows) usually ascend.
+  // Here we treat each row independently for simpler gameplay, which is also common in digital loto.
+  
   return ticket;
 };
 
@@ -94,6 +79,9 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [activeTab, setActiveTab] = useState<MobileTab>('TICKET');
   const [unreadCount, setUnreadCount] = useState(0);
+
+  // New State for Mode
+  const [isAutoMode, setIsAutoMode] = useState(true);
 
   const speakCombined = (num: number, rhyme: string) => {
     if (muted || !window.speechSynthesis) return;
@@ -123,7 +111,7 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
 
   // Logic to calculate remaining numbers for Bingo (min remaining of all rows)
   const calculateRemaining = (currentTicket: TicketData) => {
-      let minRemaining = 6; // Start high
+      let minRemaining = 4; // Start with row size (4)
       let isRowWin = false;
       
       currentTicket.forEach(row => {
@@ -133,6 +121,22 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
           if (unmarkedCount === 0) isRowWin = true;
       });
       return { minRemaining, isRowWin };
+  };
+
+  // Sync Logic helper
+  const syncTicketWithHistory = (currentTicket: TicketData, currentHistory: number[]) => {
+      let ticketChanged = false;
+      const newTicket = currentTicket.map(row => 
+          row.map(cell => {
+              // Only mark if value exists, is in history, AND not already marked
+              if (cell.value !== null && currentHistory.includes(cell.value) && !cell.marked) {
+                  ticketChanged = true;
+                  return { ...cell, marked: true };
+              }
+              return cell;
+          })
+      );
+      return { newTicket, ticketChanged };
   };
 
   const handleJoin = async (e: React.FormEvent) => {
@@ -149,7 +153,7 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
           const newPlayerRef = push(ref(database, `rooms/${code}/players`));
           const newId = newPlayerRef.key as string;
           setPlayerId(newId);
-          await set(newPlayerRef, { id: newId, name: playerName, joinedAt: Date.now(), remaining: 5 }); // 5 is max per row
+          await set(newPlayerRef, { id: newId, name: playerName, joinedAt: Date.now(), remaining: 4 }); // 4 is max per row
           onDisconnect(newPlayerRef).remove();
 
           onValue(roomRef, (snap) => {
@@ -162,43 +166,35 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
                   // Speak if new number
                   if (newCurrent !== currentCall && newCurrent !== null) speakCombined(newCurrent, newRhyme);
                   
-                  // Reset logic
+                  // Reset logic (New game)
                   if (newHistory.length === 0 && history.length > 0) {
                       setTicket(generateFullTicketSet()); setBingoStatus('none'); setMessages([]);
-                      if (newId) update(ref(database, `rooms/${code}/players/${newId}`), { remaining: 5 });
+                      if (newId) update(ref(database, `rooms/${code}/players/${newId}`), { remaining: 4 });
                   }
 
-                  // AUTO DETECT & MARK
-                  // We must do this carefully to avoid infinite loops or state issues
-                  setTicket(prevTicket => {
-                      let ticketChanged = false;
-                      const newTicket = prevTicket.map(row => 
-                          row.map(cell => {
-                              if (cell.value !== null && newHistory.includes(cell.value) && !cell.marked) {
-                                  ticketChanged = true;
-                                  return { ...cell, marked: true };
+                  setHistory(newHistory);
+                  setCurrentCall(newCurrent); 
+                  setCurrentRhyme(newRhyme);
+
+                  // AUTO DETECT Logic
+                  // We perform this check inside the listener to ensure we react to new numbers immediately if Auto is ON
+                  if (isAutoMode) {
+                      setTicket(prevTicket => {
+                          const { newTicket, ticketChanged } = syncTicketWithHistory(prevTicket, newHistory);
+                          if (ticketChanged) {
+                              const { minRemaining, isRowWin } = calculateRemaining(newTicket);
+                              if (newId) update(ref(database, `rooms/${code}/players/${newId}`), { remaining: minRemaining });
+                              
+                              if (isRowWin && bingoStatus !== 'win') {
+                                    setBingoStatus('win');
+                                    speakSimple("BINGO! CHIẾN THẮNG!");
+                                    push(ref(database, `rooms/${code}/claims`), { playerId: newId, playerName, timestamp: Date.now() });
                               }
-                              return cell;
-                          })
-                      );
-
-                      if (ticketChanged) {
-                          const { minRemaining, isRowWin } = calculateRemaining(newTicket);
-                          // Update remote state
-                          if (newId) update(ref(database, `rooms/${code}/players/${newId}`), { remaining: minRemaining });
-                          
-                          // Local Win Check
-                          if (isRowWin && bingoStatus !== 'win') {
-                                setBingoStatus('win');
-                                speakSimple("BINGO! CHIẾN THẮNG!");
-                                push(ref(database, `rooms/${code}/claims`), { playerId: newId, playerName, timestamp: Date.now() });
+                              return newTicket;
                           }
-                          return newTicket;
-                      }
-                      return prevTicket;
-                  });
-
-                  setHistory(newHistory); setCurrentCall(newCurrent); setCurrentRhyme(newRhyme);
+                          return prevTicket;
+                      });
+                  }
               } else { setIsConnected(false); alert("Phòng đã đóng"); }
           });
 
@@ -216,37 +212,53 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
       } catch (error) { setIsConnecting(false); }
   };
 
+  // Effect: When switching to Auto Mode, scan everything immediately
+  useEffect(() => {
+      if (isAutoMode && history.length > 0) {
+          setTicket(prevTicket => {
+              const { newTicket, ticketChanged } = syncTicketWithHistory(prevTicket, history);
+              if (ticketChanged) {
+                  const { minRemaining, isRowWin } = calculateRemaining(newTicket);
+                  if (playerId && roomCode) update(ref(database, `rooms/${roomCode}/players/${playerId}`), { remaining: minRemaining });
+                  if (isRowWin && bingoStatus !== 'win') {
+                        setBingoStatus('win');
+                        speakSimple("BINGO! CHIẾN THẮNG!");
+                        push(ref(database, `rooms/${roomCode}/claims`), { playerId, playerName, timestamp: Date.now() });
+                  }
+                  return newTicket;
+              }
+              return prevTicket;
+          });
+      }
+  }, [isAutoMode, history]);
+
   const handleSendMessage = (text: string) => {
       if (!playerId || !roomCode) return;
       const newMsgRef = push(ref(database, `rooms/${roomCode}/messages`));
       set(newMsgRef, { id: Date.now().toString(), sender: playerName, text: text, avatar: 'bg-indigo-600' });
   };
 
-  // Manual click handler (optional now, but kept for UX)
   const handleCellClick = (r: number, c: number, val: number) => {
+    // Check if number has been called
     if (history.includes(val)) {
-        // Just purely UI feedback, the effect actually marks it too if auto-detect failed or lagging
-        // But mainly we rely on the useEffect above.
-        // However, if user clicks, we can toggle mark if they want (undo?) 
-        // No, typically in Loto, once called, it stays called.
-        // Let's allow manual marking if network is slow.
        const newTicket = [...ticket];
-       if (!newTicket[r][c].marked) {
-           newTicket[r][c] = { ...newTicket[r][c], marked: true };
-           setTicket(newTicket);
-           // Recalculate logic is handled in the effect usually, but let's do safe check
-           const { minRemaining, isRowWin } = calculateRemaining(newTicket);
-           if (playerId && roomCode) update(ref(database, `rooms/${roomCode}/players/${playerId}`), { remaining: minRemaining });
-           if (isRowWin && bingoStatus !== 'win') {
-                setBingoStatus('win');
-                speakSimple("BINGO! CHIẾN THẮNG!");
-                if (playerId && roomCode) push(ref(database, `rooms/${roomCode}/claims`), { playerId, playerName, timestamp: Date.now() });
-           }
+       
+       // Toggle mark
+       const isMarking = !newTicket[r][c].marked;
+       newTicket[r][c] = { ...newTicket[r][c], marked: isMarking };
+       setTicket(newTicket);
+       
+       // Recalculate logic 
+       const { minRemaining, isRowWin } = calculateRemaining(newTicket);
+       if (playerId && roomCode) update(ref(database, `rooms/${roomCode}/players/${playerId}`), { remaining: minRemaining });
+       
+       if (isRowWin && bingoStatus !== 'win') {
+            setBingoStatus('win');
+            speakSimple("BINGO! CHIẾN THẮNG!");
+            if (playerId && roomCode) push(ref(database, `rooms/${roomCode}/claims`), { playerId, playerName, timestamp: Date.now() });
        }
     } else { 
-        // Allow marking even if not called? No, strict mode usually.
-        // But for "Easy mode" maybe allow? Let's keep it strict.
-        alert("Số chưa được gọi!"); 
+        alert("Số chưa được gọi! Bạn chỉ có thể đánh dấu số đã ra."); 
     }
   };
 
@@ -271,6 +283,16 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
                           <label className="text-[10px] uppercase font-bold text-slate-400 mb-1 block tracking-widest">Mã Phòng</label>
                           <input required className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-red-600 text-xl font-mono text-center tracking-[0.3em] uppercase focus:border-red-500 outline-none transition-all font-bold" placeholder="CODE" maxLength={6} value={roomCode} onChange={e => setRoomCode(e.target.value.toUpperCase())} />
                       </div>
+                      
+                      {/* Mode Selection Pre-join (optional, but good to set default) */}
+                      <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
+                          <span className="text-[10px] uppercase font-bold text-slate-400 mb-2 block tracking-widest">Chế độ chơi mặc định</span>
+                          <div className="flex gap-2">
+                             <button type="button" onClick={() => setIsAutoMode(true)} className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${isAutoMode ? 'bg-red-500 text-white shadow-md' : 'bg-white text-slate-500 border'}`}>Tự động dò</button>
+                             <button type="button" onClick={() => setIsAutoMode(false)} className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${!isAutoMode ? 'bg-red-500 text-white shadow-md' : 'bg-white text-slate-500 border'}`}>Thủ công</button>
+                          </div>
+                      </div>
+
                       <button disabled={isConnecting || !isOnline} className="w-full bg-gradient-to-r from-red-500 to-orange-500 hover:from-red-600 hover:to-orange-600 text-white font-bold text-lg py-3 rounded-xl shadow-lg transform active:scale-95 disabled:opacity-50 transition-all flex justify-center items-center gap-2">
                           {isConnecting ? <Loader className="animate-spin" size={20}/> : 'Kết Nối'}
                       </button>
@@ -348,9 +370,26 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
 
             {/* TICKET AREA - SCROLLABLE */}
             <div className="w-full flex-1 overflow-y-auto flex flex-col items-center p-3 pb-20 md:pb-4 gap-4 z-10">
-                <div className="bg-blue-50 text-blue-600 px-3 py-1 rounded text-xs font-bold border border-blue-100 shadow-sm">
-                    Tự động đánh dấu khi có số
+                {/* MODE TOGGLE */}
+                <div className="flex bg-white rounded-full p-1 shadow-sm border border-red-100">
+                     <button 
+                        onClick={() => setIsAutoMode(true)}
+                        className={`px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wide flex items-center gap-1 transition-all ${isAutoMode ? 'bg-red-500 text-white shadow' : 'text-slate-400 hover:text-red-400'}`}
+                     >
+                        <Wand2 size={12} /> Tự động
+                     </button>
+                     <button 
+                        onClick={() => setIsAutoMode(false)}
+                        className={`px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wide flex items-center gap-1 transition-all ${!isAutoMode ? 'bg-red-500 text-white shadow' : 'text-slate-400 hover:text-red-400'}`}
+                     >
+                        <Hand size={12} /> Thủ công
+                     </button>
                 </div>
+
+                <div className={`px-3 py-1 rounded text-xs font-bold border shadow-sm transition-colors ${isAutoMode ? 'bg-blue-50 text-blue-600 border-blue-100' : 'bg-orange-50 text-orange-600 border-orange-100'}`}>
+                    {isAutoMode ? 'Hệ thống sẽ tự đánh dấu số cho bạn.' : 'Bạn phải tự bấm vào số trên vé để đánh dấu.'}
+                </div>
+
                 <TicketView ticket={ticket} interactive={true} onCellClick={handleCellClick} />
             </div>
          </div>
@@ -364,7 +403,7 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
       {/* MOBILE TABS */}
       <div className="md:hidden flex border-t border-red-100 bg-white pb-safe z-40 shadow-[0_-4px_20px_rgba(0,0,0,0.05)] h-16 shrink-0">
           <button onClick={() => {setActiveTab('TICKET'); setUnreadCount(0);}} className={`flex-1 flex flex-col items-center justify-center gap-1 transition-colors ${activeTab === 'TICKET' ? 'text-red-600 bg-red-50' : 'text-slate-400'}`}>
-              <Grid3X3 size={20} /> <span className="text-[10px] font-bold uppercase tracking-widest">Vé Số (9 hàng)</span>
+              <Grid3X3 size={20} /> <span className="text-[10px] font-bold uppercase tracking-widest">Vé Số (15 hàng)</span>
           </button>
           <button onClick={() => {setActiveTab('CHAT'); setUnreadCount(0);}} className={`flex-1 flex flex-col items-center justify-center gap-1 relative transition-colors ${activeTab === 'CHAT' ? 'text-red-600 bg-red-50' : 'text-slate-400'}`}>
               <div className="relative">

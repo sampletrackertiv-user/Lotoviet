@@ -9,8 +9,8 @@ interface TicketViewProps {
 }
 
 export const TicketView: React.FC<TicketViewProps> = ({ ticket, onCellClick, interactive }) => {
-  // Ticket is now potentially 9 rows. We should group them visually if possible, or just one long card.
-  // 9 rows is long, let's keep it as one long "Sớ Táo Quân" style ticket.
+  // Ticket is now 15 rows.
+  // We'll visually group them into blocks of 3 (standard ticket size) to make it readable.
   
   return (
     <div className="w-full max-w-2xl mx-auto relative group perspective-1000 mb-8">
@@ -24,7 +24,7 @@ export const TicketView: React.FC<TicketViewProps> = ({ ticket, onCellClick, int
                  <div className="w-2 h-2 rounded-full bg-yellow-300"></div>
                  <div className="w-2 h-2 rounded-full bg-yellow-300"></div>
              </div>
-             <span className="text-[10px] text-yellow-100 font-bold uppercase tracking-widest">HỘI XUÂN 2025</span>
+             <span className="text-[10px] text-yellow-100 font-bold uppercase tracking-widest">ĐẠI HỘI LÔ TÔ 2025</span>
         </div>
         
         <div className="p-3 bg-[url('https://www.transparenttextures.com/patterns/cream-paper.png')]">
@@ -35,10 +35,10 @@ export const TicketView: React.FC<TicketViewProps> = ({ ticket, onCellClick, int
                 <React.Fragment key={rowIndex}>
                     {/* Visual separator every 3 rows to mimic separate tickets */}
                     {rowIndex > 0 && rowIndex % 3 === 0 && (
-                        <div className="h-4 flex items-center justify-center my-1 opacity-50">
-                            <div className="h-px bg-red-200 w-full dashed"></div>
-                            <span className="text-[8px] text-red-300 px-2 font-mono">CẮT TẠI ĐÂY</span>
-                            <div className="h-px bg-red-200 w-full dashed"></div>
+                        <div className="h-6 flex items-center justify-center my-1 opacity-60">
+                            <div className="h-px bg-red-300 w-full dashed"></div>
+                            <span className="text-[8px] text-red-500 px-2 font-mono whitespace-nowrap bg-white/50 rounded">VÉ {Math.floor(rowIndex/3) + 1}</span>
+                            <div className="h-px bg-red-300 w-full dashed"></div>
                         </div>
                     )}
                     
@@ -76,7 +76,7 @@ export const TicketView: React.FC<TicketViewProps> = ({ ticket, onCellClick, int
             </div>
 
             <div className="mt-4 flex justify-center items-center">
-                <span className="text-[9px] text-red-300 font-bold uppercase tracking-widest">Đại Phát • Đại Lợi</span>
+                <span className="text-[9px] text-red-300 font-bold uppercase tracking-widest">Chúc Bạn May Mắn</span>
             </div>
         </div>
       </div>
