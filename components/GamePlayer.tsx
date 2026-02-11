@@ -2,9 +2,9 @@ import React, { useState, useEffect, useRef } from 'react';
 import { TicketData, ChatMessage } from '../types';
 import { TicketView } from './TicketView';
 import { ChatOverlay } from './ChatOverlay';
-import { Volume2, VolumeX, Trophy, Link, Loader, WifiOff, MessageCircle, Grid3X3, LogOut, Database, CheckCircle2, XCircle } from 'lucide-react';
+import { Volume2, VolumeX, Trophy, Loader, MessageCircle, Grid3X3, LogOut, CheckCircle2, XCircle } from 'lucide-react';
 import { database, isFirebaseConfigured, listenToConnectionStatus } from '../services/firebase';
-import { ref, set, onValue, push, onDisconnect, get } from "firebase/database";
+import { ref, set, onValue, push, onDisconnect, get, update } from "firebase/database";
 
 interface GamePlayerProps {
   onExit: () => void;
@@ -46,7 +46,6 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
   const [isConnected, setIsConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [playerName, setPlayerName] = useState('');
-  const [connectionLost, setConnectionLost] = useState(false);
   const [playerId, setPlayerId] = useState<string | null>(null);
   const [isOnline, setIsOnline] = useState(false);
   
@@ -56,7 +55,6 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
   const [ticket, setTicket] = useState<TicketData>(generateTicket());
   const [history, setHistory] = useState<number[]>([]);
   const [currentCall, setCurrentCall] = useState<number | null>(null);
-  const [previousCall, setPreviousCall] = useState<number | null>(null);
   const [currentRhyme, setCurrentRhyme] = useState<string>('');
   const [muted, setMuted] = useState(false);
   const [bingoStatus, setBingoStatus] = useState<'none' | 'check' | 'win'>('none');
@@ -64,21 +62,31 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
   const [activeTab, setActiveTab] = useState<MobileTab>('TICKET');
   const [unreadCount, setUnreadCount] = useState(0);
 
-  const speak = (text: string) => {
+  const speakCombined = (num: number, rhyme: string) => {
+    if (muted || !window.speechSynthesis) return;
+    
+    window.speechSynthesis.cancel(); // Reset queue
+
+    const prefix = lang === 'vi' ? `Số ${num}.` : `Number ${num}.`;
+    const fullText = `${prefix} ... ${rhyme || ''}`;
+
+    const utterance = new SpeechSynthesisUtterance(fullText);
+    utterance.lang = lang === 'vi' ? 'vi-VN' : 'en-US';
+    utterance.rate = 1.0; 
+    
+    window.speechSynthesis.speak(utterance);
+  };
+
+  const speakSimple = (text: string) => {
     if (muted || !window.speechSynthesis) return;
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = lang === 'vi' ? 'vi-VN' : 'en-US';
-    utterance.rate = 1.2; 
     window.speechSynthesis.speak(utterance);
   };
 
   useEffect(() => {
-    const unsubscribeStatus = listenToConnectionStatus((status) => {
-        setIsOnline(status);
-        if (!status && isConnected) setConnectionLost(true);
-        else if (status && isConnected) setConnectionLost(false);
-    });
+    const unsubscribeStatus = listenToConnectionStatus(setIsOnline);
     const requestWakeLock = async () => { try { if ('wakeLock' in navigator) wakeLockRef.current = await navigator.wakeLock.request('screen'); } catch (err) {} };
     if (isConnected) requestWakeLock();
     return () => { if (wakeLockRef.current) wakeLockRef.current.release(); unsubscribeStatus(); };
@@ -88,7 +96,7 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
   const handleJoin = async (e: React.FormEvent) => {
       e.preventDefault();
       if (!roomCode || !playerName || !isFirebaseConfigured()) return;
-      setIsConnecting(true); setConnectionLost(false);
+      setIsConnecting(true);
       const code = roomCode.trim().toUpperCase();
       const roomRef = ref(database, `rooms/${code}`);
 
@@ -99,28 +107,26 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
           const newPlayerRef = push(ref(database, `rooms/${code}/players`));
           const newId = newPlayerRef.key as string;
           setPlayerId(newId);
-          await set(newPlayerRef, { id: newId, name: playerName, joinedAt: Date.now() });
+          // Init with 5 remaining (full row)
+          await set(newPlayerRef, { id: newId, name: playerName, joinedAt: Date.now(), remaining: 5 });
           onDisconnect(newPlayerRef).remove();
 
           onValue(roomRef, (snap) => {
               const data = snap.val();
               if (data) {
-                  if (data.status === 'HOST_DISCONNECTED') setConnectionLost(true);
-                  else setConnectionLost(false);
-
                   const newHistory = data.history || [];
                   const newCurrent = data.currentNumber;
                   const newRhyme = data.currentRhyme;
 
                   // Detect new call
                   if (newCurrent !== currentCall && newCurrent !== null) {
-                      setPreviousCall(currentCall); // Save previous
-                      speak(`${newCurrent}`);
-                      if (newRhyme) setTimeout(() => speak(newRhyme), 800);
+                      speakCombined(newCurrent, newRhyme);
                   }
                   
                   if (newHistory.length === 0 && history.length > 0) {
-                      setTicket(generateTicket()); setBingoStatus('none'); setMessages([]); setPreviousCall(null);
+                      setTicket(generateTicket()); setBingoStatus('none'); setMessages([]);
+                      // Reset remaining on new game
+                      if (newId) update(ref(database, `rooms/${code}/players/${newId}`), { remaining: 5 });
                   }
                   setHistory(newHistory); setCurrentCall(newCurrent); setCurrentRhyme(newRhyme);
               } else { setIsConnected(false); alert("Phòng đóng!"); }
@@ -151,11 +157,29 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
        const newTicket = [...ticket];
        newTicket[r][c] = { ...newTicket[r][c], marked: !newTicket[r][c].marked };
        setTicket(newTicket);
-       // Check Win
-       const isRowWin = newTicket.some(row => row.filter(cell => cell.value !== null).every(cell => cell.marked));
+       
+       // Calculate remaining per row
+       let minRemaining = 5;
+       let isRowWin = false;
+
+       newTicket.forEach(row => {
+          // Count non-null cells that are NOT marked
+          const rowCells = row.filter(cell => cell.value !== null);
+          const unmarkedCount = rowCells.filter(cell => !cell.marked).length;
+          
+          if (unmarkedCount < minRemaining) minRemaining = unmarkedCount;
+          if (unmarkedCount === 0) isRowWin = true;
+       });
+
+       // Update Firebase with remaining count
+       if (playerId && roomCode) {
+         update(ref(database, `rooms/${roomCode}/players/${playerId}`), { remaining: minRemaining });
+       }
+
        if (isRowWin && bingoStatus !== 'win') {
             setBingoStatus('win');
-            speak("BINGO! BINGO!");
+            speakSimple("BINGO! BINGO!");
+            // Legacy claim push for timestamp, though host now watches 'remaining' too
             if (playerId && roomCode) push(ref(database, `rooms/${roomCode}/claims`), { playerId, playerName, timestamp: Date.now() });
        }
     } else { alert("Số chưa gọi!"); }
@@ -213,31 +237,36 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
          {/* MAIN AREA */}
          <div className={`flex-1 flex flex-col items-center bg-red-900 relative ${activeTab === 'TICKET' ? 'flex' : 'hidden md:flex'}`}>
             
-            {/* CALL DISPLAY HEADER (Fixed Height) */}
-            <div className="w-full bg-red-950/80 p-2 flex items-center justify-center gap-4 shrink-0 border-b border-yellow-600/20 shadow-lg relative z-20">
-                {/* Previous Number (Left) */}
-                <div className="flex flex-col items-center opacity-60 scale-75">
-                    <span className="text-[8px] text-red-400 uppercase font-bold">Vừa gọi</span>
-                    <div className="w-12 h-12 rounded-full border border-red-600 bg-red-900 flex items-center justify-center text-xl font-bold text-red-300">
-                        {previousCall || '-'}
+            {/* CALL DISPLAY & HISTORY (Fixed Top) */}
+            <div className="w-full bg-red-950/90 flex flex-col shrink-0 border-b border-yellow-600/20 shadow-lg relative z-20">
+                {/* Big Number & Rhyme */}
+                <div className="p-3 flex items-center gap-4 justify-center">
+                    <div className="w-20 h-20 rounded-full bg-gradient-to-br from-yellow-400 to-red-500 border-4 border-yellow-200 shadow-[0_0_20px_rgba(250,204,21,0.5)] flex items-center justify-center shrink-0">
+                        <span className="text-5xl font-black text-red-900">{currentCall || '--'}</span>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                         <p className="text-[10px] text-yellow-500 font-bold uppercase mb-1">MC đang hô:</p>
+                         <p className="text-yellow-100 text-sm italic leading-snug break-words">"{currentRhyme || '...'}"</p>
                     </div>
                 </div>
 
-                {/* Current Number (Center) */}
-                <div className="flex flex-col items-center">
-                    <div className="w-20 h-20 rounded-full bg-gradient-to-br from-yellow-400 to-red-500 border-4 border-yellow-200 shadow-[0_0_20px_rgba(250,204,21,0.5)] flex items-center justify-center">
-                        <span className="text-4xl font-black text-red-900">{currentCall || '??'}</span>
-                    </div>
-                </div>
-
-                {/* Rhyme (Right/Floating) */}
-                <div className="absolute top-2 right-2 left-2 mt-20 text-center pointer-events-none md:static md:mt-0 md:flex-1 md:text-left md:pl-4">
-                     <p className="text-yellow-200 text-sm italic font-medium drop-shadow-md bg-red-900/80 md:bg-transparent rounded px-2 inline-block">"{currentRhyme}"</p>
+                {/* Horizontal History Scroll */}
+                <div className="bg-black/20 py-2 px-3 overflow-x-auto whitespace-nowrap scrollbar-hide flex items-center gap-2">
+                     <span className="text-[10px] font-bold text-red-400 mr-2 uppercase">Lịch sử:</span>
+                     {history.map((num, i) => (
+                         <div key={`${num}-${i}`} className={`
+                            inline-flex w-8 h-8 items-center justify-center rounded-full font-bold text-xs border
+                            ${i === 0 ? 'bg-yellow-400 text-red-900 border-yellow-200' : 'bg-red-800 text-red-200 border-red-700'}
+                         `}>
+                             {num}
+                         </div>
+                     ))}
+                     {history.length === 0 && <span className="text-xs text-white/20 italic">Chưa có...</span>}
                 </div>
             </div>
 
             {/* TICKET AREA (Scrollable) */}
-            <div className="w-full flex-1 overflow-y-auto flex items-center justify-center p-2 pb-20 md:pb-2">
+            <div className="w-full flex-1 overflow-y-auto flex items-center justify-center p-4">
                 <TicketView ticket={ticket} interactive={true} onCellClick={handleCellClick} />
             </div>
          </div>

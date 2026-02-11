@@ -1,3 +1,4 @@
+
 export type GameMode = 'HOME' | 'HOST' | 'PLAYER';
 
 export type Language = 'vi' | 'en';
@@ -32,6 +33,7 @@ export interface PlayerInfo {
   id: string; // PeerID
   name: string;
   joinedAt: number;
+  remaining?: number; // Numbers left to win (on best row)
 }
 
 export interface GameState {
