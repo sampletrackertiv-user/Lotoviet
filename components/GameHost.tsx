@@ -147,8 +147,12 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
     const u3 = onValue(msgRef, (snap) => {
          const data = snap.val();
          if (data) {
-             const msgs = Object.values(data) as ChatMessage[];
-             msgs.sort((a,b) => Number(a.id) - Number(b.id));
+             // Use Firebase Push ID (key) for sorting to ensure chronological order regardless of client clock
+             const msgs = Object.entries(data).map(([key, val]: [string, any]) => ({
+                 ...val,
+                 id: key
+             })) as ChatMessage[];
+             msgs.sort((a,b) => a.id.localeCompare(b.id));
              setMessages(msgs);
              if (activeTab !== 'CHAT') setUnreadMsgCount(prev => prev + 1);
          } else setMessages([]);

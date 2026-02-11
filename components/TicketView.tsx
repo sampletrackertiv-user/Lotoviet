@@ -24,7 +24,7 @@ export const TicketView: React.FC<TicketViewProps> = ({ ticket, onCellClick, int
                  <div className="w-2 h-2 rounded-full bg-yellow-300"></div>
                  <div className="w-2 h-2 rounded-full bg-yellow-300"></div>
              </div>
-             <span className="text-[10px] text-yellow-100 font-bold uppercase tracking-widest">ĐẠI HỘI LÔ TÔ 2025</span>
+             <span className="text-[10px] text-yellow-100 font-bold uppercase tracking-widest">ĐẠI HỘI LÔ TÔ 2026</span>
         </div>
         
         <div className="p-3 bg-[url('https://www.transparenttextures.com/patterns/cream-paper.png')]">

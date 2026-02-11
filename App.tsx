@@ -49,7 +49,7 @@ const App: React.FC = () => {
                      <Flower size={48} />
                  </div>
                  <div className="w-20 h-20 bg-white text-red-600 rounded-3xl flex items-center justify-center shadow-xl rotate-[6deg] z-10 border-4 border-red-50">
-                     <span className="text-5xl font-black">5</span>
+                     <span className="text-5xl font-black">6</span>
                  </div>
              </div>
           </div>
@@ -89,7 +89,7 @@ const App: React.FC = () => {
 
       <footer className="relative z-10 p-6 text-center border-t border-white/10">
         <p className="text-red-100 text-[10px] font-bold uppercase tracking-[0.2em] opacity-80">
-            LotoMaster AI © 2025 • Chúc Mừng Năm Mới
+            LotoMaster AI © 2026 • Chúc Mừng Năm Mới
         </p>
       </footer>
     </div>
