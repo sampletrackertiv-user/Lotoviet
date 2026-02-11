@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Play, Pause, RotateCcw, Volume2, VolumeX, Copy, Users, WifiOff, Activity, ChevronRight, RefreshCw, AlertTriangle, Database } from 'lucide-react';
+import { Play, Pause, RotateCcw, Volume2, VolumeX, Copy, Users, WifiOff, Activity, ChevronRight, RefreshCw, AlertTriangle, Database, CheckCircle2, XCircle } from 'lucide-react';
 import { generateLotoRhyme } from '../services/geminiService';
 import { Language, ChatMessage, PlayerInfo } from '../types';
-import { database, isFirebaseConfigured } from '../services/firebase';
+import { database, isFirebaseConfigured, listenToConnectionStatus } from '../services/firebase';
 import { ref, set, onValue, update, push, remove, onDisconnect } from "firebase/database";
 
 interface GameHostProps {
@@ -44,6 +44,7 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
   const [flash, setFlash] = useState(false);
   const [muted, setMuted] = useState(false);
   const [activeTab, setActiveTab] = useState<TabType>('BOARD');
+  const [isOnline, setIsOnline] = useState(false);
   
   // Network State
   const [roomCode, setRoomCode] = useState<string>('');
@@ -76,19 +77,28 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
               <div className="bg-slate-800 p-6 rounded-xl max-w-lg text-center border border-slate-700">
                   <Database size={48} className="mx-auto text-red-500 mb-4" />
                   <h2 className="text-2xl font-bold mb-2">Chưa cấu hình Database</h2>
-                  <p className="mb-4 text-slate-300">Để chơi mượt mà và không bị ngắt kết nối, bạn cần điền thông tin Firebase vào code.</p>
-                  <p className="text-sm bg-slate-900 p-2 rounded text-left font-mono text-xs mb-4 overflow-x-auto">
-                      Mở file: <code>services/firebase.ts</code><br/>
-                      Thay thế <code>firebaseConfig</code> bằng thông tin project của bạn.
-                  </p>
+                  <p className="mb-4 text-slate-300">Vui lòng kiểm tra file services/firebase.ts</p>
                   <button onClick={onExit} className="bg-indigo-600 px-4 py-2 rounded font-bold">Quay lại</button>
               </div>
           </div>
       );
   }
 
-  // 2. Wake Lock
+  // 2. Connection Monitor & Wake Lock
   useEffect(() => {
+    const unsubscribeStatus = listenToConnectionStatus((status) => {
+        setIsOnline(status);
+        if (!status) {
+            addLog("System: Lost connection to Firebase server.");
+        } else {
+            // Re-establish presence if needed
+            if (roomCode) {
+                // Optional: Update status back to active
+                // update(ref(database, `rooms/${roomCode}`), { status: 'ACTIVE' });
+            }
+        }
+    });
+
     const requestWakeLock = async () => {
       try {
         if ('wakeLock' in navigator) {
@@ -97,15 +107,12 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
       } catch (err) { console.warn('Wake Lock error:', err); }
     };
     requestWakeLock();
-    const handleVisibilityChange = async () => {
-        if (document.visibilityState === 'visible') requestWakeLock();
-    };
-    document.addEventListener('visibilitychange', handleVisibilityChange);
+    
     return () => { 
         if (wakeLockRef.current) wakeLockRef.current.release(); 
-        document.removeEventListener('visibilitychange', handleVisibilityChange);
+        unsubscribeStatus();
     };
-  }, []);
+  }, [roomCode]);
 
   // 3. Initialize Firebase Room
   useEffect(() => {
@@ -149,8 +156,6 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
                 addLog(`BINGO CLAIM: ${latestClaim.playerName}`);
                 speak(`Bingo! ${latestClaim.playerName} kêu Bingo!`);
                 alert(`${latestClaim.playerName} claims BINGO!`);
-                // Remove claim to prevent double alert? 
-                // In real app we might handle this better, but this works for simple notificaiton
             }
         }
     });
@@ -161,11 +166,8 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
         const data = snapshot.val();
         if (data) {
              const msgs = Object.values(data) as ChatMessage[];
-             // Only log the very last message to avoid spamming the log on load
-             // This is a simplified approach. Ideally we track last logged ID.
              const latestMsg = msgs.sort((a,b) => Number(a.id) - Number(b.id)).pop();
              if (latestMsg && Number(latestMsg.id) > Date.now() - 2000) {
-                 // Only show messages from the last 2 seconds in the log to avoid history spam
                  addLog(`${latestMsg.sender}: ${latestMsg.text}`);
              }
         }
@@ -283,8 +285,11 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
                 )}
                 <button onClick={copyToClipboard} className="hover:text-white p-1"><Copy size={14}/></button>
             </div>
-            <div className="flex items-center gap-1 text-xs text-green-500 bg-green-900/20 px-2 py-1 rounded border border-green-800">
-                <Database size={12} /> Live DB
+            
+            {/* Connection Status Indicator */}
+            <div className={`flex items-center gap-1 text-xs px-2 py-1 rounded border transition-colors duration-500 ${isOnline ? 'bg-green-900/20 border-green-800 text-green-500' : 'bg-red-900/20 border-red-800 text-red-500 animate-pulse'}`}>
+                {isOnline ? <CheckCircle2 size={12} /> : <XCircle size={12} />}
+                {isOnline ? 'Online' : 'Offline'}
             </div>
         </div>
 

@@ -2,8 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { TicketData, ChatMessage } from '../types';
 import { TicketView } from './TicketView';
 import { ChatOverlay } from './ChatOverlay';
-import { Volume2, VolumeX, Trophy, Link, Loader, WifiOff, MessageCircle, Grid3X3, LogOut, AlertTriangle, Database } from 'lucide-react';
-import { database, isFirebaseConfigured } from '../services/firebase';
+import { Volume2, VolumeX, Trophy, Link, Loader, WifiOff, MessageCircle, Grid3X3, LogOut, AlertTriangle, Database, CheckCircle2, XCircle } from 'lucide-react';
+import { database, isFirebaseConfigured, listenToConnectionStatus } from '../services/firebase';
 import { ref, set, onValue, push, onDisconnect, get, remove } from "firebase/database";
 
 interface GamePlayerProps {
@@ -55,6 +55,7 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
   const [playerName, setPlayerName] = useState('');
   const [connectionLost, setConnectionLost] = useState(false);
   const [playerId, setPlayerId] = useState<string | null>(null);
+  const [isOnline, setIsOnline] = useState(false);
   
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
 
@@ -87,8 +88,18 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
       if (tab === 'CHAT') setUnreadCount(0);
   };
 
-  // Wake Lock Logic
+  // Connection Monitor & Wake Lock Logic
   useEffect(() => {
+    // Monitor actual network connection
+    const unsubscribeStatus = listenToConnectionStatus((status) => {
+        setIsOnline(status);
+        if (!status && isConnected) {
+             setConnectionLost(true);
+        } else if (status && isConnected) {
+             setConnectionLost(false);
+        }
+    });
+
     const requestWakeLock = async () => {
       try {
         if ('wakeLock' in navigator) {
@@ -97,6 +108,7 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
       } catch (err) { console.warn('Wake Lock error:', err); }
     };
     if (isConnected) requestWakeLock();
+    
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible' && !wakeLockRef.current && isConnected) requestWakeLock();
     };
@@ -104,6 +116,7 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
     return () => {
       if (wakeLockRef.current) wakeLockRef.current.release();
       document.removeEventListener('visibilitychange', handleVisibilityChange);
+      unsubscribeStatus();
     };
   }, [isConnected]);
 
@@ -302,6 +315,12 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
                      </div>
                   )}
 
+                  {/* Connection Status Indicator */}
+                  <div className={`flex items-center justify-center gap-2 mb-4 text-xs font-bold transition-colors ${isOnline ? 'text-green-500' : 'text-red-500'}`}>
+                      {isOnline ? <CheckCircle2 size={16}/> : <XCircle size={16}/>}
+                      {isOnline ? (lang === 'vi' ? 'Đã kết nối máy chủ' : 'Server Connected') : (lang === 'vi' ? 'Mất kết nối máy chủ' : 'Server Disconnected')}
+                  </div>
+
                   {!isFirebaseConfigured() && (
                       <div className="bg-yellow-500/20 text-yellow-300 p-3 rounded-lg mb-4 text-xs flex items-center gap-2 border border-yellow-500/30">
                           <Database size={16} />
@@ -329,7 +348,7 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
                              Kết nối an toàn qua Google Firebase
                           </p>
                       </div>
-                      <button disabled={isConnecting || !isFirebaseConfigured()} className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-bold py-4 rounded-xl transition-all flex justify-center items-center gap-2 shadow-lg transform active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed">
+                      <button disabled={isConnecting || !isFirebaseConfigured() || !isOnline} className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-bold py-4 rounded-xl transition-all flex justify-center items-center gap-2 shadow-lg transform active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed">
                           {isConnecting ? <Loader className="animate-spin"/> : <Link />}
                           {isConnecting ? 'Đang kết nối...' : (lang === 'vi' ? 'Vào Phòng Ngay' : 'Join Room')}
                       </button>
@@ -345,8 +364,9 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
       {/* Navbar */}
       <nav className="p-3 bg-slate-800 border-b border-slate-700 flex justify-between items-center shadow-lg z-20 shrink-0">
          <div className="flex items-center gap-3">
-            <div className="bg-green-600 text-white font-bold px-3 py-1 rounded text-xs uppercase tracking-wider flex items-center gap-1">
-                <div className="w-2 h-2 bg-white rounded-full animate-pulse"></div> DB
+            <div className={`font-bold px-3 py-1 rounded text-xs uppercase tracking-wider flex items-center gap-1 border ${isOnline ? 'bg-green-900/20 border-green-800 text-green-500' : 'bg-red-900/20 border-red-800 text-red-500'}`}>
+                <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></div> 
+                DB
             </div>
             {connectionLost && <WifiOff className="text-red-500 animate-pulse" />}
          </div>
