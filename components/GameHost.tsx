@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Play, Pause, RotateCcw, Volume2, Share2, Mic, Copy, Users, AlertCircle, RefreshCw, WifiOff } from 'lucide-react';
+import { Play, Pause, RotateCcw, Volume2, VolumeX, Share2, Mic, Copy, Users, AlertCircle, RefreshCw, WifiOff } from 'lucide-react';
 import { generateLotoRhyme } from '../services/geminiService';
 import { Language, NetworkPayload, ChatMessage } from '../types';
 import Peer, { DataConnection } from 'peerjs';
@@ -17,6 +17,7 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
   const [isAuto, setIsAuto] = useState(false);
   const [speed, setSpeed] = useState(6000);
   const [flash, setFlash] = useState(false);
+  const [muted, setMuted] = useState(false);
   
   // Network State
   const [peerId, setPeerId] = useState<string>('');
@@ -30,6 +31,51 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
   // Refs for logic
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const connectionsRef = useRef<DataConnection[]>([]); // Synced ref for callbacks
+  const wakeLockRef = useRef<WakeLockSentinel | null>(null);
+
+  // TTS Helper
+  const speak = (text: string) => {
+    if (muted || !window.speechSynthesis) return;
+    
+    // Cancel previous speech to avoid backlog
+    window.speechSynthesis.cancel();
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = lang === 'vi' ? 'vi-VN' : 'en-US';
+    utterance.rate = 1.0;
+    utterance.pitch = 1.0;
+    
+    window.speechSynthesis.speak(utterance);
+  };
+
+  // Wake Lock Logic
+  useEffect(() => {
+    const requestWakeLock = async () => {
+      try {
+        if ('wakeLock' in navigator) {
+          wakeLockRef.current = await navigator.wakeLock.request('screen');
+          console.log('Wake Lock active');
+        }
+      } catch (err) {
+        console.warn('Wake Lock error:', err);
+      }
+    };
+
+    requestWakeLock();
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && !wakeLockRef.current) {
+        requestWakeLock();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      if (wakeLockRef.current) wakeLockRef.current.release();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, []);
 
   // Initialize PeerJS (Host)
   useEffect(() => {
@@ -48,7 +94,9 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
         peer.on('open', (id) => {
           console.log('Host ID:', id);
           setPeerId(id);
-          setCurrentRhyme(lang === 'vi' ? "Phòng đã sẵn sàng! Mời mọi người vào." : "Room Ready! Waiting for players.");
+          const readyMsg = lang === 'vi' ? "Phòng đã sẵn sàng! Mời mọi người vào." : "Room Ready! Waiting for players.";
+          setCurrentRhyme(readyMsg);
+          speak(readyMsg);
           setPeerError(null);
           setIsSignalingLost(false);
         });
@@ -172,6 +220,7 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
       stopAuto();
       const endMsg = lang === 'vi' ? "Hết số rồi!" : "Game Over!";
       setCurrentRhyme(endMsg);
+      speak(endMsg);
       broadcast({ type: 'CALL_NUMBER', payload: { number: null, rhyme: endMsg, history: calledNumbers } });
       return;
     }
@@ -185,9 +234,15 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
     setCalledNumbers(newHistory);
     setTimeout(() => setFlash(false), 500);
 
+    // Speak just the number immediately for low latency feeling
+    speak(lang === 'vi' ? `Số ${nextNum}` : `Number ${nextNum}`);
+
     // AI Rhyme
     const rhyme = await generateLotoRhyme(nextNum, lang);
     setCurrentRhyme(rhyme);
+    
+    // Speak rhyme after a tiny delay
+    setTimeout(() => speak(rhyme), 800);
 
     // Broadcast
     broadcast({
@@ -245,7 +300,14 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
         <h1 className="text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-red-500">
           Loto Master <span className="text-xs text-slate-400 font-normal border border-slate-600 px-2 py-0.5 rounded ml-2">HOST</span>
         </h1>
-        <div className="flex gap-2">
+        <div className="flex gap-2 items-center">
+            <button 
+             onClick={() => setMuted(!muted)} 
+             className="p-2 hover:bg-slate-800 rounded-full text-slate-300 mr-2"
+             title={muted ? "Unmute" : "Mute"}
+            >
+             {muted ? <VolumeX size={20} /> : <Volume2 size={20} />}
+            </button>
            <button onClick={resetGame} className="p-2 hover:bg-slate-800 rounded text-slate-300" title="Reset">
             <RotateCcw size={20} />
           </button>

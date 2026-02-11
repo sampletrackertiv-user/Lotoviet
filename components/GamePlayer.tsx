@@ -54,6 +54,7 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
   
   const connRef = useRef<DataConnection | null>(null);
   const peerRef = useRef<Peer | null>(null);
+  const wakeLockRef = useRef<WakeLockSentinel | null>(null);
 
   // Game State
   const [ticket, setTicket] = useState<TicketData>(generateTicket());
@@ -64,13 +65,51 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
   const [bingoStatus, setBingoStatus] = useState<'none' | 'check' | 'win'>('none');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
 
+  // TTS Helper
+  const speak = (text: string) => {
+    if (muted || !window.speechSynthesis) return;
+    
+    // Cancel previous speech to avoid backlog
+    window.speechSynthesis.cancel();
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = lang === 'vi' ? 'vi-VN' : 'en-US';
+    utterance.rate = 1.0;
+    
+    window.speechSynthesis.speak(utterance);
+  };
+
+  // Wake Lock Logic
   useEffect(() => {
-    // Cleanup on unmount
-    return () => {
-        if (connRef.current) connRef.current.close();
-        if (peerRef.current) peerRef.current.destroy();
+    const requestWakeLock = async () => {
+      try {
+        if ('wakeLock' in navigator) {
+          wakeLockRef.current = await navigator.wakeLock.request('screen');
+        }
+      } catch (err) {
+        console.warn('Wake Lock error:', err);
+      }
     };
-  }, []);
+
+    if (isConnected) {
+        requestWakeLock();
+    }
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && !wakeLockRef.current && isConnected) {
+        requestWakeLock();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      if (wakeLockRef.current) wakeLockRef.current.release();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      if (connRef.current) connRef.current.close();
+      if (peerRef.current) peerRef.current.destroy();
+    };
+  }, [isConnected]);
 
   const handleJoin = (e: React.FormEvent) => {
       e.preventDefault();
@@ -98,9 +137,18 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
               
               switch (action.type) {
                   case 'CALL_NUMBER':
-                      setCurrentCall(action.payload.number);
-                      setCurrentRhyme(action.payload.rhyme);
+                      const num = action.payload.number;
+                      const rhyme = action.payload.rhyme;
+                      
+                      setCurrentCall(num);
+                      setCurrentRhyme(rhyme);
                       setHistory(action.payload.history);
+                      
+                      // Speak logic: Number first, then rhyme
+                      if (num) {
+                        speak(lang === 'vi' ? `Số ${num}` : `Number ${num}`);
+                        if (rhyme) setTimeout(() => speak(rhyme), 1000);
+                      }
                       break;
                   case 'SYNC_STATE':
                       setHistory(action.payload.history);
@@ -200,6 +248,7 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
       if (numbersInRow.length > 0 && numbersInRow.every(cell => cell.marked)) {
         setBingoStatus('win');
         setCurrentRhyme("KINH! KINH! KINH! BINGO!!!");
+        speak("BINGO! BINGO!");
         // Optionally send 'I WON' to host here
         return;
       }
@@ -207,6 +256,7 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
     const allNumbers = currentTicket.flat().filter(c => c.value !== null);
     if (allNumbers.every(c => c.marked)) {
         setBingoStatus('win');
+        speak("BINGO! Full House!");
     }
   };
 

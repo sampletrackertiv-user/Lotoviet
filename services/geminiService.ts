@@ -16,8 +16,9 @@ export const generateLotoRhyme = async (number: number, lang: Language): Promise
       : `Number ${number}! Check your tickets!`;
   }
 
-  const promptVi = `Bạn là người hô lô tô hội chợ vui tính. Hãy sáng tác 1 câu thơ lục bát hoặc câu vè ngắn (2 dòng), hài hước, vần điệu để hô con số ${number}. Chỉ trả về nội dung câu thơ/vè, không thêm dẫn dắt.`;
-  const promptEn = `You are a Bingo caller. Write a short, funny, 2-line rhyming couplet to announce the number ${number}. Return only the rhyme.`;
+  // Optimized prompts for TTS and brevity
+  const promptVi = `Bạn là người hô lô tô. Hãy viết 1 câu thơ lục bát hoặc vè ngắn (tối đa 20 từ) để hô số ${number}. Quan trọng: Chỉ trả về nội dung câu thơ, không có lời dẫn, không có dấu ngoặc kép.`;
+  const promptEn = `You are a Bingo caller. Write a very short, funny rhyming couplet (max 15 words) for number ${number}. Return ONLY the text, no quotes.`;
 
   try {
     const response = await ai.models.generateContent({
@@ -25,11 +26,12 @@ export const generateLotoRhyme = async (number: number, lang: Language): Promise
       contents: lang === 'vi' ? promptVi : promptEn,
       config: {
         thinkingConfig: { thinkingBudget: 0 }, // Low latency needed
-        maxOutputTokens: 60,
+        maxOutputTokens: 50,
+        temperature: 1.0, // High creativity
       }
     });
 
-    return response.text?.trim() || (lang === 'vi' ? `Số ${number}!` : `Number ${number}!`);
+    return response.text?.trim().replace(/["']/g, "") || (lang === 'vi' ? `Số ${number}!` : `Number ${number}!`);
   } catch (error) {
     console.error("Gemini API Error:", error);
     return lang === 'vi' ? `Số ${number}!` : `Number ${number}!`;
