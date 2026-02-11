@@ -6,6 +6,7 @@ import { database, isFirebaseConfigured, listenToConnectionStatus } from '../ser
 import { ref, set, onValue, update, remove, onDisconnect, push } from "firebase/database";
 import { ChatOverlay } from './ChatOverlay';
 import { TicketView } from './TicketView';
+import { EmojiSystem } from './EmojiSystem';
 
 interface GameHostProps {
   onExit: () => void;
@@ -49,10 +50,11 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
   // Game State
   const [calledNumbers, setCalledNumbers] = useState<number[]>([]);
   const [currentNumber, setCurrentNumber] = useState<number | null>(null);
+  const [displayNumber, setDisplayNumber] = useState<number | null>(null); // For spinning effect
   const [previousNumber, setPreviousNumber] = useState<number | null>(null);
   const [currentRhyme, setCurrentRhyme] = useState<string>('');
   const [isAuto, setIsAuto] = useState(false);
-  const [speed, setSpeed] = useState(4000); 
+  const [speed, setSpeed] = useState(6000); // Increased default speed to account for spinning time
   const [flash, setFlash] = useState(false);
   const [muted, setMuted] = useState(false);
   const [isOnline, setIsOnline] = useState(false);
@@ -60,6 +62,7 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
   const [waiters, setWaiters] = useState<PlayerInfo[]>([]);
   const [roomCode, setRoomCode] = useState<string>('');
   const [players, setPlayers] = useState<PlayerInfo[]>([]);
+  const [isSpinning, setIsSpinning] = useState(false);
   
   // UI Tabs State
   const [activeTab, setActiveTab] = useState<'DASHBOARD' | 'CHAT' | 'TICKET'>('DASHBOARD');
@@ -73,10 +76,34 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
   const historyScrollRef = useRef<HTMLDivElement>(null);
   const prevWaitersCount = useRef(0);
+  const audioContextRef = useRef<AudioContext | null>(null);
 
   useEffect(() => {
     if (historyScrollRef.current) historyScrollRef.current.scrollLeft = 0;
   }, [calledNumbers]);
+
+  // Click sound effect for spinning
+  const playClickSound = () => {
+    if (muted) return;
+    if (!audioContextRef.current) audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const ctx = audioContextRef.current;
+    if (ctx.state === 'suspended') ctx.resume();
+    
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(800, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(100, ctx.currentTime + 0.1);
+    
+    gain.gain.setValueAtTime(0.1, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.1);
+    
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.1);
+  };
 
   const speakCombined = (num: number, rhyme: string) => {
     if (muted || !window.speechSynthesis) return;
@@ -147,7 +174,6 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
     const u3 = onValue(msgRef, (snap) => {
          const data = snap.val();
          if (data) {
-             // Use Firebase Push ID (key) for sorting to ensure chronological order regardless of client clock
              const msgs = Object.entries(data).map(([key, val]: [string, any]) => ({
                  ...val,
                  id: key
@@ -179,6 +205,8 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
 
   const drawNumber = async () => {
     if (winners.length > 0) { setIsAuto(false); return; }
+    if (isSpinning) return; // Prevent double calling
+
     const available = Array.from({ length: 90 }, (_, i) => i + 1).filter(n => !calledNumbers.includes(n));
     if (available.length === 0) {
       setIsAuto(false);
@@ -186,20 +214,55 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
       setCurrentRhyme(endMsg); speakSimple(endMsg); updateGameState(null, endMsg, calledNumbers);
       return;
     }
+
+    // 1. Start Spinning Effect
+    setIsSpinning(true);
+    setCurrentRhyme("Đang quay...");
+    
+    // Choose result in advance
     const nextNum = available[Math.floor(Math.random() * available.length)];
-    const newHistory = [nextNum, ...calledNumbers];
-    setFlash(true); setPreviousNumber(currentNumber); setCurrentNumber(nextNum); setCalledNumbers(newHistory);
-    setTimeout(() => setFlash(false), 300);
     let rhyme = "";
     try { rhyme = await generateLotoRhyme(nextNum, lang); } catch { rhyme = `Số ${nextNum}`; }
-    setCurrentRhyme(rhyme); speakCombined(nextNum, rhyme); updateGameState(nextNum, rhyme, newHistory);
+
+    let spinTime = 0;
+    const maxSpinTime = 1200; // 1.2 seconds of spinning
+    const spinInterval = setInterval(() => {
+        spinTime += 60;
+        const randomDisplay = Math.floor(Math.random() * 90) + 1;
+        setDisplayNumber(randomDisplay);
+        playClickSound();
+
+        if (spinTime >= maxSpinTime) {
+            clearInterval(spinInterval);
+            finishDraw(nextNum, rhyme);
+        }
+    }, 60);
+  };
+
+  const finishDraw = (nextNum: number, rhyme: string) => {
+    setIsSpinning(false);
+    const newHistory = [nextNum, ...calledNumbers];
+    setFlash(true); 
+    setPreviousNumber(currentNumber); 
+    setCurrentNumber(nextNum); 
+    setDisplayNumber(nextNum);
+    setCalledNumbers(newHistory);
+    
+    setTimeout(() => setFlash(false), 500);
+    
+    setCurrentRhyme(rhyme); 
+    speakCombined(nextNum, rhyme); 
+    updateGameState(nextNum, rhyme, newHistory);
   };
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout>;
-    if (isAuto && calledNumbers.length < 90 && winners.length === 0) timer = setTimeout(drawNumber, speed);
+    // Adjust auto speed to account for spin time
+    if (isAuto && calledNumbers.length < 90 && winners.length === 0 && !isSpinning) {
+        timer = setTimeout(drawNumber, speed);
+    }
     return () => clearTimeout(timer);
-  }, [isAuto, calledNumbers, speed, winners.length]);
+  }, [isAuto, calledNumbers, speed, winners.length, isSpinning]);
 
   // --- HOST PLAYING LOGIC ---
   const joinAsHostPlayer = () => {
@@ -242,7 +305,7 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
              push(ref(database, `rooms/${roomCode}/claims`), { playerId: hostPlayerId, playerName: "👑 HOST", timestamp: Date.now() });
           }
       }
-  }, [calledNumbers]); // Depend on calledNumbers to update immediately
+  }, [calledNumbers]); 
 
   // --- ACTIONS ---
   const toggleAuto = () => {
@@ -252,7 +315,7 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
 
   const resetGame = () => {
     if (!confirm('Chơi ván mới?')) return;
-    setIsAuto(false); setCalledNumbers([]); setCurrentNumber(null); setPreviousNumber(null);
+    setIsAuto(false); setCalledNumbers([]); setCurrentNumber(null); setDisplayNumber(null); setPreviousNumber(null);
     setWinners([]); setWaiters([]); prevWaitersCount.current = 0; setCurrentRhyme("Chào mừng quý vị!");
     
     // Reset Host Ticket if playing
@@ -263,7 +326,7 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
     }
 
     updateGameState(null, "Chào mừng quý vị!", []);
-    update(ref(database), { [`rooms/${roomCode}/claims`]: null, [`rooms/${roomCode}/messages`]: null });
+    update(ref(database), { [`rooms/${roomCode}/claims`]: null, [`rooms/${roomCode}/messages`]: null, [`rooms/${roomCode}/reactions`]: null });
   };
 
   const handleHostSendMessage = (text: string) => {
@@ -304,6 +367,7 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
 
       {/* MAIN CONTENT */}
       <main className="flex-1 flex flex-col md:flex-row overflow-hidden relative">
+        <EmojiSystem roomCode={roomCode} senderName="👑 HOST" />
         
         {/* LEFT: STAGE */}
         <section className="flex-none md:w-[35%] lg:w-[30%] bg-gradient-to-b from-white to-red-50 border-b md:border-b-0 md:border-r border-red-100 flex flex-col items-center p-4 gap-4 relative">
@@ -313,8 +377,8 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
             </div>
 
             <div className="flex-1 flex flex-col items-center justify-center w-full min-h-[220px]">
-                <div onClick={isAuto ? () => setIsAuto(false) : drawNumber} className="relative group cursor-pointer transition-transform active:scale-95">
-                    <div className="absolute inset-0 bg-yellow-400 rounded-full blur-xl opacity-20 animate-pulse"></div>
+                <div onClick={isAuto ? () => setIsAuto(false) : drawNumber} className={`relative group cursor-pointer transition-transform active:scale-95 ${isSpinning ? 'pointer-events-none' : ''}`}>
+                    <div className={`absolute inset-0 bg-yellow-400 rounded-full blur-xl opacity-20 ${isAuto || isSpinning ? 'animate-pulse' : ''}`}></div>
                     <div className={`
                         relative w-48 h-48 rounded-full
                         bg-gradient-to-br from-red-500 to-orange-500
@@ -322,10 +386,11 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
                         border-4 border-white ring-4 ring-red-100
                         transition-all duration-200
                         ${flash ? 'scale-105 brightness-110' : ''}
+                        ${isSpinning ? 'animate-bounce-fast' : ''}
                     `}>
-                        {currentNumber ? (
-                            <span className="text-[100px] leading-none font-black text-white ball-pop drop-shadow-md">
-                                {currentNumber}
+                        {displayNumber ? (
+                            <span className={`text-[100px] leading-none font-black text-white ball-pop drop-shadow-md ${isSpinning ? 'opacity-80' : 'opacity-100'}`}>
+                                {displayNumber}
                             </span>
                         ) : (
                             <div className="flex flex-col items-center gap-1 text-white/90">
@@ -359,7 +424,7 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
                         <span>Tốc độ</span>
                         <span className="text-red-500">{speed/1000}s</span>
                      </div>
-                     <input type="range" min="3000" max="8000" step="500" value={speed} onChange={(e) => setSpeed(Number(e.target.value))} className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-red-500" />
+                     <input type="range" min="4000" max="9000" step="500" value={speed} onChange={(e) => setSpeed(Number(e.target.value))} className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-red-500" />
                  </div>
                  
                  <button 

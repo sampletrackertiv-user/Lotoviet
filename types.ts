@@ -44,6 +44,13 @@ export interface GameState {
   totalBalls: number; // 90 usually
 }
 
+export interface Reaction {
+  id: string;
+  type: string; // 'heart', 'haha', 'wow', 'sad', 'angry', 'tomato'
+  sender: string;
+  timestamp: number;
+}
+
 // Networking Types
 export type NetworkActionType = 
   | 'SYNC_STATE' 

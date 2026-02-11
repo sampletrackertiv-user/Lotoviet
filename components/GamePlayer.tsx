@@ -5,6 +5,7 @@ import { ChatOverlay } from './ChatOverlay';
 import { Volume2, VolumeX, Trophy, Loader, MessageCircle, Grid3X3, LogOut, Radio, Hand, Wand2 } from 'lucide-react';
 import { database, isFirebaseConfigured, listenToConnectionStatus } from '../services/firebase';
 import { ref, set, onValue, push, onDisconnect, get, update } from "firebase/database";
+import { EmojiSystem } from './EmojiSystem';
 
 interface GamePlayerProps {
   onExit: () => void;
@@ -51,12 +52,6 @@ const generateFullTicketSet = (): TicketData => {
       ticket[r][c] = { value: num, marked: false };
     });
   }
-
-  // Sort columns slightly to ensure ascending order logic if we were strictly following sheet rules,
-  // but for a continuous list, row-based randomness is fine.
-  // Standard Loto: numbers in a column on a single ticket (3 rows) usually ascend.
-  // Here we treat each row independently for simpler gameplay, which is also common in digital loto.
-  
   return ticket;
 };
 
@@ -201,7 +196,6 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
           onValue(ref(database, `rooms/${code}/messages`), (snap) => {
               const data = snap.val();
               if (data) {
-                  // Use Firebase Push ID (key) for sorting to ensure chronological order regardless of client clock
                   const msgs = Object.entries(data).map(([key, val]: [string, any]) => ({
                       ...val,
                       id: key 
@@ -328,17 +322,33 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
 
       {/* Main Container */}
       <div className="flex-1 overflow-hidden flex flex-col md:flex-row relative">
+         <EmojiSystem roomCode={roomCode} senderName={playerName} />
+
          {bingoStatus === 'win' && (
             <div className="absolute inset-0 z-50 bg-black/80 flex items-center justify-center flex-col p-6 animate-in fade-in backdrop-blur-sm">
                 <div className="relative">
+                    {/* Confetti-like background */}
+                    <div className="absolute inset-0 overflow-hidden pointer-events-none">
+                         {[...Array(20)].map((_, i) => (
+                             <div key={i} className="absolute w-2 h-2 bg-yellow-400 rounded-full animate-ping" style={{top: `${Math.random()*100}%`, left: `${Math.random()*100}%`, animationDelay: `${Math.random()}s`}}></div>
+                         ))}
+                    </div>
+
                     <div className="absolute inset-0 bg-yellow-400 rounded-full blur-3xl opacity-50 animate-pulse"></div>
-                    <div className="relative mb-6 p-6 rounded-full bg-gradient-to-br from-yellow-300 to-orange-500 text-white animate-bounce shadow-2xl">
-                        <Trophy size={64} />
+                    <div className="relative mb-6 p-8 rounded-full bg-gradient-to-br from-yellow-300 to-orange-500 text-white animate-bounce shadow-2xl ring-8 ring-white/20">
+                        <Trophy size={80} />
                     </div>
                 </div>
-                <h2 className="text-5xl md:text-6xl font-black text-white mb-2 tracking-tighter uppercase drop-shadow-lg text-center">CHIẾN THẮNG!</h2>
-                <p className="text-white text-xl mb-8 font-medium">Bạn đã trúng Lô Tô!</p>
-                <button onClick={onExit} className="bg-white text-red-600 px-10 py-3 rounded-full font-bold uppercase tracking-widest hover:scale-105 transition-transform shadow-xl">Thoát</button>
+                <h2 className="text-5xl md:text-7xl font-black text-transparent bg-clip-text bg-gradient-to-r from-yellow-300 via-orange-300 to-yellow-300 mb-4 tracking-tighter uppercase drop-shadow-lg text-center animate-pulse">
+                    CHIẾN THẮNG!
+                </h2>
+                <p className="text-white/90 text-xl md:text-2xl mb-10 font-bold text-center max-w-md">
+                    Chúc mừng! Năm mới phát tài phát lộc!
+                </p>
+                <div className="flex gap-4">
+                     <button onClick={onExit} className="bg-white/10 backdrop-blur hover:bg-white/20 text-white px-8 py-3 rounded-full font-bold uppercase tracking-widest transition-all border border-white/30">Thoát</button>
+                     <button onClick={() => setBingoStatus('check')} className="bg-white text-red-600 px-10 py-3 rounded-full font-bold uppercase tracking-widest hover:scale-105 transition-transform shadow-xl">Xem lại vé</button>
+                </div>
             </div>
          )}
          
