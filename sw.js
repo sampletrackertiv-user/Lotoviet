@@ -1,65 +1,66 @@
-const CACHE_NAME = 'loto-master-v3';
-const OFFLINE_URL = './index.html';
-
-const ASSETS_TO_CACHE = [
+const CACHE_NAME = 'loto-master-v4';
+const SHELL_ASSETS = [
   './',
   './index.html',
   './manifest.json',
-  './index.tsx',
-  './App.tsx',
-  './types.ts'
+  './index.tsx'
 ];
 
-// Install: Cache the offline page and core assets
+// Force immediate activation
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(ASSETS_TO_CACHE);
+      console.log('Caching shell assets');
+      return cache.addAll(SHELL_ASSETS);
     })
   );
   self.skipWaiting();
 });
 
-// Activate: Clean up old caches
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((cacheNames) => {
+    caches.keys().then((keys) => {
       return Promise.all(
-        cacheNames.map((cacheName) => {
-          if (cacheName !== CACHE_NAME) {
-            return caches.delete(cacheName);
-          }
-        })
+        keys.filter(key => key !== CACHE_NAME).map(key => caches.delete(key))
       );
     })
   );
   self.clients.claim();
 });
 
-// Fetch: Network first, then fallback to cache, then fallback to index.html
 self.addEventListener('fetch', (event) => {
+  // Only handle GET requests
+  if (event.request.method !== 'GET') return;
+
+  // For Navigation requests (opening the app, refreshing)
   if (event.request.mode === 'navigate') {
     event.respondWith(
       fetch(event.request).catch(() => {
-        return caches.match(OFFLINE_URL);
+        // Fallback to the cached index.html (the App Shell)
+        return caches.match('./index.html') || caches.match('./');
       })
     );
     return;
   }
 
+  // For other assets (scripts, styles, images)
   event.respondWith(
-    caches.match(event.request).then((response) => {
-      return response || fetch(event.request).then((fetchResponse) => {
-        // Optionally cache new resources dynamically
-        if (fetchResponse.status === 200 && event.request.url.startsWith('http')) {
-          const responseClone = fetchResponse.clone();
+    caches.match(event.request).then((cachedResponse) => {
+      if (cachedResponse) {
+        return cachedResponse;
+      }
+
+      return fetch(event.request).then((networkResponse) => {
+        // Check if we should cache this new resource
+        if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
+          const responseToCache = networkResponse.clone();
           caches.open(CACHE_NAME).then((cache) => {
-            cache.put(event.request, responseClone);
+            cache.put(event.request, responseToCache);
           });
         }
-        return fetchResponse;
+        return networkResponse;
       }).catch(() => {
-        // Fallback for non-navigation requests if needed
+        // Silently fail for non-critical assets
         return null;
       });
     })
