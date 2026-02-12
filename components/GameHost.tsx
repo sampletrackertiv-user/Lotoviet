@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Play, Pause, RotateCcw, Volume2, VolumeX, Copy, CheckCircle2, XCircle, Trophy, Crown, Flame, Dice5, Sun, LogOut, Users, MessageCircle, Grid3X3, Zap } from 'lucide-react';
+import { Play, Pause, RotateCcw, Volume2, VolumeX, Copy, CheckCircle2, XCircle, Trophy, Crown, Flame, Dice5, Sun, LogOut, Users, MessageCircle, Grid3X3, Zap, Settings, Mic, WifiOff } from 'lucide-react';
 import { generateLotoRhyme } from '../services/geminiService';
 import { Language, PlayerInfo, TicketData, ChatMessage } from '../types';
 import { database, isFirebaseConfigured, listenToConnectionStatus } from '../services/firebase';
@@ -50,11 +50,11 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
   // Game State
   const [calledNumbers, setCalledNumbers] = useState<number[]>([]);
   const [currentNumber, setCurrentNumber] = useState<number | null>(null);
-  const [displayNumber, setDisplayNumber] = useState<number | null>(null); // For spinning effect
+  const [displayNumber, setDisplayNumber] = useState<number | null>(null);
   const [previousNumber, setPreviousNumber] = useState<number | null>(null);
   const [currentRhyme, setCurrentRhyme] = useState<string>('');
   const [isAuto, setIsAuto] = useState(false);
-  const [speed, setSpeed] = useState(6000); // Increased default speed to account for spinning time
+  const [speed, setSpeed] = useState(6000);
   const [flash, setFlash] = useState(false);
   const [muted, setMuted] = useState(false);
   const [isOnline, setIsOnline] = useState(false);
@@ -82,23 +82,18 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
     if (historyScrollRef.current) historyScrollRef.current.scrollLeft = 0;
   }, [calledNumbers]);
 
-  // Click sound effect for spinning
   const playClickSound = () => {
     if (muted) return;
     if (!audioContextRef.current) audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
     const ctx = audioContextRef.current;
     if (ctx.state === 'suspended') ctx.resume();
-    
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
-    
     osc.type = 'triangle';
     osc.frequency.setValueAtTime(800, ctx.currentTime);
     osc.frequency.exponentialRampToValueAtTime(100, ctx.currentTime + 0.1);
-    
     gain.gain.setValueAtTime(0.1, ctx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.1);
-    
     osc.connect(gain);
     gain.connect(ctx.destination);
     osc.start();
@@ -205,7 +200,7 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
 
   const drawNumber = async () => {
     if (winners.length > 0) { setIsAuto(false); return; }
-    if (isSpinning) return; // Prevent double calling
+    if (isSpinning) return;
 
     const available = Array.from({ length: 90 }, (_, i) => i + 1).filter(n => !calledNumbers.includes(n));
     if (available.length === 0) {
@@ -215,17 +210,15 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
       return;
     }
 
-    // 1. Start Spinning Effect
     setIsSpinning(true);
     setCurrentRhyme("Đang quay...");
     
-    // Choose result in advance
     const nextNum = available[Math.floor(Math.random() * available.length)];
     let rhyme = "";
     try { rhyme = await generateLotoRhyme(nextNum, lang); } catch { rhyme = `Số ${nextNum}`; }
 
     let spinTime = 0;
-    const maxSpinTime = 1200; // 1.2 seconds of spinning
+    const maxSpinTime = 1200; 
     const spinInterval = setInterval(() => {
         spinTime += 60;
         const randomDisplay = Math.floor(Math.random() * 90) + 1;
@@ -257,7 +250,6 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout>;
-    // Adjust auto speed to account for spin time
     if (isAuto && calledNumbers.length < 90 && winners.length === 0 && !isSpinning) {
         timer = setTimeout(drawNumber, speed);
     }
@@ -272,15 +264,14 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
       const newRef = push(ref(database, `rooms/${roomCode}/players`));
       const pid = newRef.key as string;
       setHostPlayerId(pid);
-      set(newRef, { id: pid, name: "👑 HOST", joinedAt: Date.now(), remaining: 4 });
-      onDisconnect(newRef).remove();
+      set(newRef, { id: pid, name: "👑 HOST", joinedAt: Date.now(), remaining: 4, isOnline: true });
+      // Change: Update to offline instead of remove
+      onDisconnect(newRef).update({ isOnline: false });
       speakSimple("Host đã tham gia cuộc chơi!");
   };
 
-  // Sync Host Ticket (Auto Mark)
   useEffect(() => {
       if (!hostTicket || !hostPlayerId) return;
-      
       let ticketChanged = false;
       const newTicket = hostTicket.map(row => row.map(cell => {
            if (cell.value !== null && calledNumbers.includes(cell.value) && !cell.marked) {
@@ -317,14 +308,11 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
     if (!confirm('Chơi ván mới?')) return;
     setIsAuto(false); setCalledNumbers([]); setCurrentNumber(null); setDisplayNumber(null); setPreviousNumber(null);
     setWinners([]); setWaiters([]); prevWaitersCount.current = 0; setCurrentRhyme("Chào mừng quý vị!");
-    
-    // Reset Host Ticket if playing
     if (hostPlayerId) {
         const newTicket = generateHostTicket();
         setHostTicket(newTicket);
         update(ref(database, `rooms/${roomCode}/players/${hostPlayerId}`), { remaining: 4 });
     }
-
     updateGameState(null, "Chào mừng quý vị!", []);
     update(ref(database), { [`rooms/${roomCode}/claims`]: null, [`rooms/${roomCode}/messages`]: null, [`rooms/${roomCode}/reactions`]: null });
   };
@@ -335,32 +323,32 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
       set(newMsgRef, { id: Date.now().toString(), sender: "👑 HOST", text: text, isSystem: false });
   };
 
-  if (!isFirebaseConfigured()) return <div className="p-10 text-white">Chưa cấu hình Firebase</div>;
+  if (!isFirebaseConfigured()) return <div className="p-10 text-slate-800">Chưa cấu hình Firebase</div>;
 
   return (
-    <div className="flex flex-col h-screen bg-stone-50 text-slate-800 font-sans overflow-hidden">
+    <div className="flex flex-col h-screen bg-[#f3f4f6] text-slate-800 font-sans overflow-hidden">
       
-      {/* HEADER */}
-      <header className="h-14 px-4 flex justify-between items-center shrink-0 bg-white border-b border-red-100 shadow-sm z-50">
+      {/* APP HEADER */}
+      <header className="h-14 px-4 flex justify-between items-center bg-white border-b border-slate-100 shrink-0 z-50">
          <div className="flex items-center gap-2">
-             <div onClick={() => navigator.clipboard.writeText(roomCode)} className="flex flex-col items-start bg-red-50 px-3 py-1 rounded-lg border border-red-100 cursor-pointer active:scale-95 transition-transform">
-                 <span className="text-[9px] text-red-400 font-bold uppercase">MÃ PHÒNG</span>
-                 <div className="flex items-center gap-1">
-                    <code className="text-red-700 font-mono font-black text-lg leading-none">{roomCode}</code>
-                    <Copy size={12} className="text-red-400"/>
+             <div onClick={() => navigator.clipboard.writeText(roomCode)} className="flex items-center gap-2 bg-slate-50 hover:bg-slate-100 px-3 py-1.5 rounded-full border border-slate-200 cursor-pointer transition-colors group">
+                 <div className="flex flex-col items-start leading-none">
+                     <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">MÃ PHÒNG</span>
+                     <span className="text-red-600 font-mono font-black text-base">{roomCode}</span>
                  </div>
+                 <Copy size={14} className="text-slate-400 group-hover:text-red-500"/>
              </div>
          </div>
 
          <div className="flex items-center gap-2">
-             <button onClick={() => setMuted(!muted)} className="w-10 h-10 flex items-center justify-center bg-slate-100 hover:bg-slate-200 rounded-full text-slate-600 transition-colors">
-                {muted ? <VolumeX size={20}/> : <Volume2 size={20}/>}
+             <button onClick={() => setMuted(!muted)} className={`w-9 h-9 flex items-center justify-center rounded-full transition-colors ${muted ? 'bg-red-50 text-red-500' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'}`}>
+                {muted ? <VolumeX size={18}/> : <Volume2 size={18}/>}
              </button>
-             <button onClick={resetGame} className="w-10 h-10 flex items-center justify-center bg-slate-100 hover:bg-slate-200 rounded-full text-slate-600 transition-colors">
-                <RotateCcw size={20}/>
+             <button onClick={resetGame} className="w-9 h-9 flex items-center justify-center bg-slate-50 hover:bg-slate-100 rounded-full text-slate-600 transition-colors">
+                <RotateCcw size={18}/>
              </button>
-             <button onClick={onExit} className="bg-red-600 text-white px-4 py-2 rounded-full font-bold text-sm shadow hover:bg-red-700 flex items-center gap-1">
-                <LogOut size={16} /> Thoát
+             <button onClick={onExit} className="bg-white border border-slate-200 text-slate-600 px-3 py-1.5 rounded-full font-bold text-xs hover:bg-slate-50 flex items-center gap-1 shadow-sm">
+                <LogOut size={14} /> <span className="hidden sm:inline">Thoát</span>
              </button>
          </div>
       </header>
@@ -370,85 +358,83 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
         <EmojiSystem roomCode={roomCode} senderName="👑 HOST" />
         
         {/* LEFT: STAGE */}
-        <section className="flex-none md:w-[35%] lg:w-[30%] bg-gradient-to-b from-white to-red-50 border-b md:border-b-0 md:border-r border-red-100 flex flex-col items-center p-4 gap-4 relative">
-            <div className={`absolute top-4 left-4 flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-bold border ${isOnline ? 'bg-green-100 border-green-200 text-green-700' : 'bg-red-100 border-red-200 text-red-700'}`}>
-                {isOnline ? <CheckCircle2 size={10}/> : <XCircle size={10}/>}
+        <section className="flex-none md:w-[40%] bg-white border-b md:border-b-0 md:border-r border-slate-100 flex flex-col items-center justify-between p-4 relative">
+            <div className={`absolute top-4 left-4 flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-bold border ${isOnline ? 'bg-green-50 border-green-200 text-green-600' : 'bg-red-50 border-red-200 text-red-600'}`}>
+                <div className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-green-500' : 'bg-red-500'}`}></div>
                 <span>{isOnline ? 'ONLINE' : 'OFFLINE'}</span>
             </div>
 
-            <div className="flex-1 flex flex-col items-center justify-center w-full min-h-[220px]">
-                <div onClick={isAuto ? () => setIsAuto(false) : drawNumber} className={`relative group cursor-pointer transition-transform active:scale-95 ${isSpinning ? 'pointer-events-none' : ''}`}>
-                    <div className={`absolute inset-0 bg-yellow-400 rounded-full blur-xl opacity-20 ${isAuto || isSpinning ? 'animate-pulse' : ''}`}></div>
+            {/* Spinner Area */}
+            <div className="flex-1 flex flex-col items-center justify-center w-full min-h-[250px] relative">
+                
+                <div onClick={isAuto ? () => setIsAuto(false) : drawNumber} className={`relative group cursor-pointer active:scale-95 transition-all ${isSpinning ? 'pointer-events-none' : ''}`}>
+                    {/* Decorative Ring */}
+                    <div className="absolute inset-0 rounded-full border-[6px] border-red-100 animate-[spin_10s_linear_infinite]"></div>
+                    <div className="absolute inset-0 rounded-full border-[6px] border-t-red-500 border-r-transparent border-b-transparent border-l-transparent animate-[spin_3s_linear_infinite] opacity-50"></div>
+                    
                     <div className={`
-                        relative w-48 h-48 rounded-full
-                        bg-gradient-to-br from-red-500 to-orange-500
-                        flex items-center justify-center shadow-xl
-                        border-4 border-white ring-4 ring-red-100
-                        transition-all duration-200
-                        ${flash ? 'scale-105 brightness-110' : ''}
-                        ${isSpinning ? 'animate-bounce-fast' : ''}
+                        relative w-56 h-56 rounded-full
+                        bg-white shadow-[0_10px_40px_-10px_rgba(0,0,0,0.1)]
+                        flex items-center justify-center
+                        border-8 border-slate-50
+                        transition-all duration-300
+                        ${flash ? 'scale-105 border-red-100' : ''}
                     `}>
                         {displayNumber ? (
-                            <span className={`text-[100px] leading-none font-black text-white ball-pop drop-shadow-md ${isSpinning ? 'opacity-80' : 'opacity-100'}`}>
+                            <span className={`text-[110px] leading-none font-black text-slate-800 tracking-tighter ball-pop ${isSpinning ? 'blur-sm opacity-50' : ''}`}>
                                 {displayNumber}
                             </span>
                         ) : (
-                            <div className="flex flex-col items-center gap-1 text-white/90">
-                                <Dice5 size={48} />
-                                <span className="text-xs uppercase font-bold">Bấm để quay</span>
+                            <div className="flex flex-col items-center gap-2 text-slate-300">
+                                <Dice5 size={64} strokeWidth={1.5} />
+                                <span className="text-xs font-bold uppercase tracking-widest">Bấm để quay</span>
                             </div>
                         )}
                     </div>
                 </div>
 
-                <div className="mt-4 bg-white/80 backdrop-blur border border-red-100 px-4 py-2 rounded-xl text-center shadow-sm max-w-[90%]">
-                    <p className="text-slate-800 text-lg font-medium italic font-serif leading-snug">
-                        "{currentRhyme || '...'}"
-                    </p>
+                <div className="mt-8 text-center px-4">
+                     <h3 className="text-xl font-bold text-slate-800 leading-tight">
+                        {currentRhyme || "Sẵn sàng..."}
+                     </h3>
+                     {previousNumber && <p className="text-sm text-slate-400 mt-2 font-medium">Số trước: <span className="text-slate-600 font-bold">{previousNumber}</span></p>}
                 </div>
             </div>
 
-            <div className="w-full flex items-center justify-between px-4 py-2 bg-white rounded-lg border border-slate-200">
-                <span className="text-xs text-slate-400 font-bold uppercase">Số trước</span>
-                <span className="text-2xl font-bold text-slate-600">{previousNumber || '--'}</span>
+            {/* Controls */}
+            <div className="w-full max-w-sm space-y-4">
+                 <div className="flex items-center gap-3 bg-slate-50 p-3 rounded-2xl">
+                     <span className="text-[10px] font-bold text-slate-400 uppercase w-10">Chậm</span>
+                     <input type="range" min="4000" max="9000" step="500" value={speed} onChange={(e) => setSpeed(Number(e.target.value))} className="flex-1 h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-red-600" />
+                     <span className="text-[10px] font-bold text-slate-400 uppercase w-10 text-right">Nhanh</span>
+                 </div>
+
+                 <button 
+                    onClick={toggleAuto}
+                    className={`w-full py-4 rounded-2xl font-bold text-sm uppercase tracking-widest flex items-center justify-center gap-2 shadow-sm transition-all
+                    ${isAuto 
+                        ? 'bg-red-50 text-red-600 border border-red-200' 
+                        : 'bg-slate-900 text-white hover:bg-slate-800'}`}
+                 >
+                    {isAuto ? <Pause size={18} fill="currentColor"/> : <Play size={18} fill="currentColor"/>}
+                    {isAuto ? 'Dừng Tự Động' : 'Quay Tự Động'}
+                 </button>
             </div>
         </section>
 
         {/* RIGHT: TABS & CONTENT */}
-        <section className="flex-1 flex flex-col bg-stone-50 overflow-hidden">
+        <section className="flex-1 flex flex-col bg-[#f9fafb] overflow-hidden">
             
-            {/* Control Strip */}
-            <div className="h-16 px-4 flex items-center justify-between bg-white border-b border-slate-200">
-                 <div className="flex flex-col w-2/5 md:w-1/3">
-                     <div className="flex justify-between text-[10px] uppercase font-bold text-slate-400 mb-1">
-                        <span>Tốc độ</span>
-                        <span className="text-red-500">{speed/1000}s</span>
-                     </div>
-                     <input type="range" min="4000" max="9000" step="500" value={speed} onChange={(e) => setSpeed(Number(e.target.value))} className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-red-500" />
-                 </div>
-                 
-                 <button 
-                    onClick={toggleAuto}
-                    className={`h-10 px-6 rounded-full font-bold text-xs uppercase tracking-widest transition-all flex items-center gap-2 shadow-md transform active:scale-95
-                    ${isAuto 
-                        ? 'bg-white text-red-500 border border-red-500 animate-pulse' 
-                        : 'bg-red-600 text-white hover:bg-red-700'}`}
-                 >
-                    {isAuto ? <Pause size={14} fill="currentColor"/> : <Play size={14} fill="currentColor"/>}
-                    {isAuto ? 'Dừng' : 'Tự Động'}
-                 </button>
-            </div>
-
             {/* History Ribbon */}
-            <div className="h-16 bg-slate-50 border-b border-slate-200 flex items-center px-4 overflow-hidden shrink-0">
-                 <span className="text-xs font-bold text-slate-400 mr-2 shrink-0">ĐÃ GỌI ({calledNumbers.length}):</span>
-                 <div ref={historyScrollRef} className="flex-1 flex items-center gap-1.5 overflow-x-auto scrollbar-hide">
+            <div className="h-14 bg-white border-b border-slate-100 flex items-center px-4 overflow-hidden shrink-0">
+                 <span className="text-[10px] font-bold text-slate-400 mr-2 shrink-0 uppercase tracking-wider">Đã gọi:</span>
+                 <div ref={historyScrollRef} className="flex-1 flex items-center gap-2 overflow-x-auto scrollbar-hide">
                      {calledNumbers.map((num, i) => (
                          <div key={`${num}-${i}`} className={`
-                            w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 shadow-sm
+                            w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0
                             ${i === 0 
-                                ? 'bg-yellow-400 text-red-900 border-2 border-white scale-110' 
-                                : 'bg-white text-slate-500 border border-slate-200'}
+                                ? 'bg-red-600 text-white shadow-md scale-110' 
+                                : 'bg-slate-100 text-slate-500'}
                          `}>
                              {num}
                          </div>
@@ -457,98 +443,114 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
             </div>
 
             {/* TABS HEADER */}
-            <div className="flex border-b border-slate-200 bg-white">
-                <button onClick={() => setActiveTab('DASHBOARD')} className={`flex-1 py-3 text-xs font-bold uppercase tracking-widest flex items-center justify-center gap-2 border-b-2 transition-all ${activeTab === 'DASHBOARD' ? 'border-red-500 text-red-600 bg-red-50' : 'border-transparent text-slate-400'}`}>
-                    <Users size={16} /> Người Chơi ({players.length})
+            <div className="flex p-2 gap-2">
+                <button onClick={() => setActiveTab('DASHBOARD')} className={`flex-1 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition-all ${activeTab === 'DASHBOARD' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-400 hover:bg-white/50'}`}>
+                    <Users size={16} /> Người Chơi <span className="bg-slate-100 text-slate-600 px-1.5 rounded-md text-[10px]">{players.length}</span>
                 </button>
-                <button onClick={() => setActiveTab('CHAT')} className={`flex-1 py-3 text-xs font-bold uppercase tracking-widest flex items-center justify-center gap-2 border-b-2 transition-all relative ${activeTab === 'CHAT' ? 'border-red-500 text-red-600 bg-red-50' : 'border-transparent text-slate-400'}`}>
+                <button onClick={() => setActiveTab('CHAT')} className={`flex-1 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition-all relative ${activeTab === 'CHAT' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-400 hover:bg-white/50'}`}>
                     <MessageCircle size={16} /> Chat
-                    {unreadMsgCount > 0 && <span className="absolute top-2 right-4 w-2 h-2 rounded-full bg-red-500"></span>}
+                    {unreadMsgCount > 0 && <span className="absolute top-1 right-2 w-2 h-2 rounded-full bg-red-500 border border-white"></span>}
                 </button>
-                <button onClick={() => setActiveTab('TICKET')} className={`flex-1 py-3 text-xs font-bold uppercase tracking-widest flex items-center justify-center gap-2 border-b-2 transition-all ${activeTab === 'TICKET' ? 'border-red-500 text-red-600 bg-red-50' : 'border-transparent text-slate-400'}`}>
-                    <Grid3X3 size={16} /> Vé Của Tôi
+                <button onClick={() => setActiveTab('TICKET')} className={`flex-1 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition-all ${activeTab === 'TICKET' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-400 hover:bg-white/50'}`}>
+                    <Grid3X3 size={16} /> Vé Host
                 </button>
             </div>
 
             {/* TAB CONTENT */}
-            <div className="flex-1 overflow-hidden relative bg-[#fafaf9]">
-                 
-                 {/* DASHBOARD TAB */}
-                 {activeTab === 'DASHBOARD' && (
-                    <div className="absolute inset-0 overflow-y-auto p-4 md:p-6 animate-in fade-in">
-                        {winners.length > 0 && (
-                            <div className="mb-6 p-1 rounded-2xl bg-gradient-to-r from-yellow-300 to-red-500 shadow-lg animate-bounce-slow">
-                                <div className="bg-white rounded-xl p-4 flex items-center gap-4">
-                                    <div className="p-3 bg-yellow-100 rounded-full text-yellow-600">
+            <div className="flex-1 overflow-hidden relative px-2 pb-2">
+                 <div className="absolute inset-2 bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+                     {/* DASHBOARD TAB */}
+                     {activeTab === 'DASHBOARD' && (
+                        <div className="h-full overflow-y-auto p-4 animate-in fade-in">
+                            {winners.length > 0 && (
+                                <div className="mb-6 p-4 rounded-2xl bg-gradient-to-r from-yellow-300 to-orange-400 text-white shadow-lg flex items-center gap-4">
+                                    <div className="p-3 bg-white/20 rounded-full backdrop-blur">
                                         <Crown size={24} fill="currentColor" />
                                     </div>
-                                    <div className="flex-1">
-                                        <h2 className="text-lg font-black text-red-600 uppercase">Có người trúng!</h2>
-                                        <p className="text-slate-800 font-medium">Chúc mừng: <span className="text-red-600 font-bold">{winners.map(w => w.name).join(', ')}</span></p>
+                                    <div>
+                                        <h2 className="text-sm font-bold uppercase opacity-90">Người chiến thắng</h2>
+                                        <p className="text-lg font-black">{winners.map(w => w.name).join(', ')}</p>
                                     </div>
                                 </div>
+                            )}
+                            
+                            <div className="flex items-center justify-between mb-4">
+                                <h3 className="text-sm font-bold text-slate-700">Danh sách tham gia</h3>
+                                {waiters.length > 0 && <span className="text-xs font-bold text-orange-500 bg-orange-50 px-2 py-1 rounded-lg">{waiters.length} người chờ đặc biệt</span>}
                             </div>
-                        )}
-                        <div className="flex items-center justify-between mb-3">
-                            <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400">Danh sách</h3>
-                            {waiters.length > 0 && <span className="text-xs font-bold text-orange-500 animate-pulse">{waiters.length} người chờ đặc biệt</span>}
-                        </div>
-                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
-                            {players.sort((a,b) => (a.remaining || 6) - (b.remaining || 6)).map(p => {
-                                const remaining = p.remaining !== undefined ? p.remaining : 4;
-                                if (remaining === 0) {
+
+                            <div className="space-y-2">
+                                {players.sort((a,b) => (a.remaining || 6) - (b.remaining || 6)).map(p => {
+                                    const remaining = p.remaining !== undefined ? p.remaining : 4;
+                                    const isWin = remaining === 0;
+                                    const isOffline = p.isOnline === false; // Explicit check for false, undefined assumes true/legacy
+                                    
                                     return (
-                                        <div key={p.id} className="p-3 rounded-xl bg-yellow-400 text-red-900 font-bold flex justify-between items-center shadow">
-                                            <div className="truncate flex-1 text-sm">{p.name}</div>
-                                            <Trophy size={14} />
+                                        <div key={p.id} className={`p-3 rounded-xl border flex justify-between items-center ${isWin ? 'bg-yellow-50 border-yellow-200' : 'bg-slate-50 border-slate-100'} ${isOffline ? 'opacity-50 grayscale' : ''}`}>
+                                            <div className="flex items-center gap-3 overflow-hidden">
+                                                <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs ${isWin ? 'bg-yellow-400 text-yellow-900' : 'bg-white border border-slate-200 text-slate-500'}`}>
+                                                    {p.name.charAt(0)}
+                                                </div>
+                                                <div className="flex flex-col overflow-hidden">
+                                                    <span className={`text-sm font-bold truncate ${isWin ? 'text-yellow-700' : 'text-slate-700'}`}>{p.name}</span>
+                                                    {isOffline && <span className="text-[9px] text-slate-400 font-bold uppercase">Mất kết nối</span>}
+                                                </div>
+                                            </div>
+                                            
+                                            {isWin ? (
+                                                <Trophy size={18} className="text-yellow-500" />
+                                            ) : (
+                                                <div className="flex items-center gap-1">
+                                                    <span className="text-[10px] text-slate-400 uppercase font-bold mr-1">Còn</span>
+                                                    <span className={`w-6 h-6 rounded-lg flex items-center justify-center text-xs font-bold ${remaining === 1 ? 'bg-orange-500 text-white animate-pulse' : 'bg-white border border-slate-200 text-slate-600'}`}>
+                                                        {remaining}
+                                                    </span>
+                                                </div>
+                                            )}
                                         </div>
-                                    )
-                                }
-                                return (
-                                    <div key={p.id} className={`p-3 rounded-xl border flex justify-between items-center shadow-sm ${remaining === 1 ? 'bg-orange-50 border-orange-200' : 'bg-white border-slate-100'}`}>
-                                        <div className="truncate flex-1 text-sm font-medium text-slate-700">{p.name}</div>
-                                        <span className={`text-[10px] w-5 h-5 flex items-center justify-center rounded-full font-bold ${remaining === 1 ? 'bg-orange-500 text-white animate-pulse' : 'bg-slate-100 text-slate-400'}`}>
-                                            {remaining}
-                                        </span>
-                                    </div>
-                                );
-                            })}
+                                    );
+                                })}
+                            </div>
                         </div>
-                    </div>
-                 )}
+                     )}
 
-                 {/* CHAT TAB */}
-                 {activeTab === 'CHAT' && (
-                    <div className="absolute inset-0 animate-in fade-in flex flex-col">
-                        <ChatOverlay messages={messages} onSendMessage={handleHostSendMessage} playerName="👑 HOST" />
-                    </div>
-                 )}
+                     {/* CHAT TAB */}
+                     {activeTab === 'CHAT' && (
+                        <div className="h-full animate-in fade-in flex flex-col">
+                            <ChatOverlay messages={messages} onSendMessage={handleHostSendMessage} playerName="👑 HOST" />
+                        </div>
+                     )}
 
-                 {/* TICKET TAB */}
-                 {activeTab === 'TICKET' && (
-                    <div className="absolute inset-0 overflow-y-auto p-4 animate-in fade-in flex flex-col items-center">
-                        {!hostPlayerId ? (
-                            <div className="flex flex-col items-center justify-center h-full gap-4 text-center p-8">
-                                <div className="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center text-red-500 mb-2">
-                                    <Zap size={40} />
+                     {/* TICKET TAB */}
+                     {activeTab === 'TICKET' && (
+                        <div className="h-full overflow-y-auto p-4 animate-in fade-in flex flex-col items-center justify-center">
+                            {!hostPlayerId ? (
+                                <div className="text-center p-6">
+                                    <div className="w-16 h-16 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-400 mx-auto mb-4">
+                                        <TicketView ticket={[]} interactive={false} /> {/* Dummy Icon essentially */}
+                                        <Grid3X3 size={32} />
+                                    </div>
+                                    <h3 className="text-lg font-bold text-slate-800 mb-2">Tham gia chơi</h3>
+                                    <p className="text-slate-500 text-sm mb-6 max-w-xs mx-auto">Host có thể tạo vé và chơi cùng mọi người. Hệ thống sẽ tự động dò số.</p>
+                                    <button onClick={joinAsHostPlayer} className="bg-slate-900 text-white px-6 py-3 rounded-full font-bold shadow-lg hover:bg-slate-800 transition-colors">
+                                        Tạo Vé Ngay
+                                    </button>
                                 </div>
-                                <h3 className="text-xl font-bold text-slate-800">Tham Gia Chơi Cùng</h3>
-                                <p className="text-slate-500 text-sm max-w-xs">Host cũng có thể sở hữu vé và chơi như người bình thường. Máy sẽ tự động dò số cho bạn.</p>
-                                <button onClick={joinAsHostPlayer} className="bg-red-600 hover:bg-red-700 text-white px-8 py-3 rounded-xl font-bold shadow-lg transform active:scale-95 transition-all">
-                                    Lấy Vé Ngay
-                                </button>
-                            </div>
-                        ) : (
-                            <div className="w-full max-w-2xl">
-                                <div className="mb-4 flex items-center justify-between bg-white p-3 rounded-xl border border-red-100 shadow-sm">
-                                    <span className="text-xs font-bold text-slate-500 uppercase">Trạng thái</span>
-                                    <span className="text-xs font-bold text-green-600 bg-green-50 px-2 py-1 rounded">Đang chơi tự động</span>
+                            ) : (
+                                <div className="w-full h-full flex flex-col">
+                                    <div className="mb-4 flex items-center justify-between bg-green-50 p-3 rounded-xl border border-green-100">
+                                        <div className="flex items-center gap-2">
+                                            <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
+                                            <span className="text-xs font-bold text-green-700">Đang tự động dò</span>
+                                        </div>
+                                        <span className="text-[10px] font-bold uppercase text-green-600 tracking-wider">Vé của Host</span>
+                                    </div>
+                                    {hostTicket && <TicketView ticket={hostTicket} interactive={false} />}
                                 </div>
-                                {hostTicket && <TicketView ticket={hostTicket} interactive={false} />}
-                            </div>
-                        )}
-                    </div>
-                 )}
+                            )}
+                        </div>
+                     )}
+                 </div>
             </div>
         </section>
       </main>

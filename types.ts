@@ -34,6 +34,7 @@ export interface PlayerInfo {
   name: string;
   joinedAt: number;
   remaining?: number; // Numbers left to win (on best row)
+  isOnline?: boolean; // New field to track connection status
 }
 
 export interface GameState {
