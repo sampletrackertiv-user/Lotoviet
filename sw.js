@@ -1,66 +1,67 @@
-const CACHE_NAME = 'loto-master-v2-dynamic';
-const STATIC_ASSETS = [
+const CACHE_NAME = 'loto-master-v3';
+const OFFLINE_URL = './index.html';
+
+const ASSETS_TO_CACHE = [
   './',
   './index.html',
-  './manifest.json'
+  './manifest.json',
+  './index.tsx',
+  './App.tsx',
+  './types.ts'
 ];
 
-// 1. Install Event: Cache core static files immediately
-self.addEventListener('install', (e) => {
-  e.waitUntil(
+// Install: Cache the offline page and core assets
+self.addEventListener('install', (event) => {
+  event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(STATIC_ASSETS);
+      return cache.addAll(ASSETS_TO_CACHE);
     })
   );
   self.skipWaiting();
 });
 
-// 2. Activate Event: Clean up old caches
-self.addEventListener('activate', (e) => {
-  e.waitUntil(
-    caches.keys().then((keys) => {
+// Activate: Clean up old caches
+self.addEventListener('activate', (event) => {
+  event.waitUntil(
+    caches.keys().then((cacheNames) => {
       return Promise.all(
-        keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))
+        cacheNames.map((cacheName) => {
+          if (cacheName !== CACHE_NAME) {
+            return caches.delete(cacheName);
+          }
+        })
       );
     })
   );
   self.clients.claim();
 });
 
-// 3. Fetch Event: Network First, then Cache (Dynamic Caching)
-self.addEventListener('fetch', (e) => {
-  // Only handle HTTP/HTTPS requests
-  if (!e.request.url.startsWith('http')) return;
+// Fetch: Network first, then fallback to cache, then fallback to index.html
+self.addEventListener('fetch', (event) => {
+  if (event.request.mode === 'navigate') {
+    event.respondWith(
+      fetch(event.request).catch(() => {
+        return caches.match(OFFLINE_URL);
+      })
+    );
+    return;
+  }
 
-  e.respondWith(
-    fetch(e.request)
-      .then((networkResponse) => {
-        // If network fetch is successful, clone and cache it
-        if (!networkResponse || networkResponse.status !== 200 || networkResponse.type !== 'basic') {
-          return networkResponse;
+  event.respondWith(
+    caches.match(event.request).then((response) => {
+      return response || fetch(event.request).then((fetchResponse) => {
+        // Optionally cache new resources dynamically
+        if (fetchResponse.status === 200 && event.request.url.startsWith('http')) {
+          const responseClone = fetchResponse.clone();
+          caches.open(CACHE_NAME).then((cache) => {
+            cache.put(event.request, responseClone);
+          });
         }
-
-        const responseToCache = networkResponse.clone();
-        caches.open(CACHE_NAME).then((cache) => {
-          cache.put(e.request, responseToCache);
-        });
-
-        return networkResponse;
-      })
-      .catch(() => {
-        // If network fails (offline), try to get from cache
-        return caches.match(e.request).then((cachedResponse) => {
-          if (cachedResponse) {
-            return cachedResponse;
-          }
-          
-          // Fallback for navigation requests (e.g., reloading the page while offline)
-          if (e.request.mode === 'navigate') {
-            return caches.match('./index.html');
-          }
-
-          return null; // Resource not found in cache or network
-        });
-      })
+        return fetchResponse;
+      }).catch(() => {
+        // Fallback for non-navigation requests if needed
+        return null;
+      });
+    })
   );
 });

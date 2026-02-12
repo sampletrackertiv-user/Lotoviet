@@ -12,7 +12,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="LotoMaster" />
 
-    <!-- SVG Favicon (Data URI for immediate rendering without external files) -->
+    <!-- SVG Favicon -->
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><circle cx=%2250%22 cy=%2250%22 r=%2245%22 fill=%22%23dc2626%22 stroke=%22%23fef3c7%22 stroke-width=%225%22/><text x=%2250%22 y=%2265%22 font-family=%22sans-serif%22 font-size=%2250%22 text-anchor=%22middle%22 fill=%22white%22 font-weight=%22bold%22>L</text></svg>">
     <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/3076/3076753.png">
 
@@ -21,17 +21,12 @@
     <style>
       body {
         font-family: 'Inter', sans-serif;
-        background-color: #fff1f2; /* Rose 50 */
-        color: #881337; /* Rose 900 */
-        overscroll-behavior-y: none; /* Prevent pull-to-refresh on mobile app feel */
+        background-color: #fff1f2;
+        color: #881337;
+        overscroll-behavior-y: none;
       }
-      .scrollbar-hide::-webkit-scrollbar {
-          display: none;
-      }
-      .scrollbar-hide {
-          -ms-overflow-style: none;
-          scrollbar-width: none;
-      }
+      .scrollbar-hide::-webkit-scrollbar { display: none; }
+      .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
       .glass {
         background: rgba(255, 255, 255, 0.7);
         backdrop-filter: blur(12px);
@@ -72,9 +67,11 @@
     <script type="module" src="./index.tsx"></script>
     <script>
       if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('./sw.js')
-          .then(() => console.log('Service Worker Registered'))
-          .catch((err) => console.log('SW Registration Failed', err));
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('./sw.js')
+            .then(reg => console.log('SW registered'))
+            .catch(err => console.log('SW error', err));
+        });
       }
     </script>
   </body>
