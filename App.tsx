@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { GameMode, Language } from './types';
 import { GameHost } from './components/GameHost';
 import { GamePlayer } from './components/GamePlayer';
+import { InstallPrompt } from './components/InstallPrompt';
 import { Play, Zap, Trophy, Flower } from 'lucide-react';
 
 const App: React.FC = () => {
@@ -16,6 +17,8 @@ const App: React.FC = () => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-red-600 via-orange-500 to-yellow-500 text-white flex flex-col relative overflow-hidden font-sans selection:bg-yellow-400 selection:text-red-900">
       
+      <InstallPrompt />
+
       {/* Festive Background Patterns */}
       <div className="absolute inset-0 z-0 pointer-events-none">
           <div className="absolute top-[-10%] left-[-10%] w-[500px] h-[500px] bg-yellow-400/20 rounded-full blur-[100px]"></div>
