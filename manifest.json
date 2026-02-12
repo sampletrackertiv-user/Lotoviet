@@ -1,7 +1,8 @@
 {
   "name": "LotoMaster AI - Đại Hội Lô Tô",
   "short_name": "LotoMaster",
-  "start_url": ".",
+  "start_url": "./index.html",
+  "scope": ".",
   "display": "standalone",
   "background_color": "#fff1f2",
   "theme_color": "#dc2626",

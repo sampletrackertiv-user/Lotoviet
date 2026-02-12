@@ -6,7 +6,7 @@
     <title>LotoMaster AI - Tet 2026</title>
     
     <!-- PWA Configuration -->
-    <link rel="manifest" href="/manifest.json" />
+    <link rel="manifest" href="./manifest.json" />
     <meta name="theme-color" content="#dc2626" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -70,5 +70,12 @@
   <body>
     <div id="root"></div>
     <script type="module" src="./index.tsx"></script>
+    <script>
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('./sw.js')
+          .then(() => console.log('Service Worker Registered'))
+          .catch((err) => console.log('SW Registration Failed', err));
+      }
+    </script>
   </body>
 </html>
