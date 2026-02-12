@@ -73,8 +73,11 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
   const speakCombined = (num: number, rhyme: string) => {
     if (muted || !window.speechSynthesis) return;
     window.speechSynthesis.cancel();
-    const prefix = lang === 'vi' ? `Số ${num}.` : `Number ${num}.`;
-    const fullText = `${prefix} ... ${rhyme || ''}`;
+    
+    // Logic thay đổi: Nếu là tiếng Việt thì chỉ đọc rhyme (đã có số ở cuối), 
+    // nếu tiếng Anh thì đọc "Number X" trước.
+    const fullText = lang === 'vi' ? (rhyme || `Số ${num}`) : `Number ${num}. ... ${rhyme || ''}`;
+    
     const utterance = new SpeechSynthesisUtterance(fullText);
     utterance.lang = lang === 'vi' ? 'vi-VN' : 'en-US';
     utterance.rate = 1.0; 
@@ -342,8 +345,8 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
             </div>
          )}
          
-         {/* TICKET & GAME AREA */}
-         <div className={`flex-1 flex flex-col items-center bg-[#f3f4f6] relative overflow-hidden ${activeTab === 'TICKET' ? 'flex' : 'hidden md:flex'}`}>
+         {/* TICKET & GAME AREA - CHANGED: bg-[#f3f4f6] to bg-transparent */}
+         <div className={`flex-1 flex flex-col items-center bg-transparent relative z-10 overflow-hidden ${activeTab === 'TICKET' ? 'flex' : 'hidden md:flex'}`}>
             
             {/* CALL DISPLAY - Modern Card */}
             <div className="w-full shrink-0 max-w-lg mt-4 px-4 z-10">
@@ -399,7 +402,7 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
          </div>
 
          {/* CHAT AREA (Desktop Side / Mobile Tab) */}
-         <div className={`md:w-80 md:border-l border-slate-100 bg-white flex flex-col ${activeTab === 'CHAT' ? 'flex-1' : 'hidden md:flex'}`}>
+         <div className={`md:w-80 md:border-l border-slate-100 bg-white flex flex-col relative z-10 ${activeTab === 'CHAT' ? 'flex-1' : 'hidden md:flex'}`}>
              <ChatOverlay messages={messages} onSendMessage={handleSendMessage} playerName={playerName} />
          </div>
       </div>

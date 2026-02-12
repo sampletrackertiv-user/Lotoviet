@@ -103,8 +103,11 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
   const speakCombined = (num: number, rhyme: string) => {
     if (muted || !window.speechSynthesis) return;
     window.speechSynthesis.cancel();
-    const prefix = lang === 'vi' ? `Số ${num}.` : `Number ${num}.`;
-    const fullText = `${prefix} ... ${rhyme}`;
+    
+    // Logic thay đổi: Nếu là tiếng Việt thì chỉ đọc rhyme (đã có số ở cuối), 
+    // nếu tiếng Anh thì đọc "Number X" trước.
+    const fullText = lang === 'vi' ? rhyme : `Number ${num}. ... ${rhyme}`;
+    
     const utterance = new SpeechSynthesisUtterance(fullText);
     utterance.lang = lang === 'vi' ? 'vi-VN' : 'en-US';
     utterance.rate = 1.0; 
@@ -358,7 +361,7 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
         <EmojiSystem roomCode={roomCode} senderName="👑 HOST" />
         
         {/* LEFT: STAGE */}
-        <section className="flex-none md:w-[40%] bg-white border-b md:border-b-0 md:border-r border-slate-100 flex flex-col items-center justify-between p-4 relative">
+        <section className="flex-none md:w-[40%] bg-white border-b md:border-b-0 md:border-r border-slate-100 flex flex-col items-center justify-between p-4 relative z-10">
             <div className={`absolute top-4 left-4 flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-bold border ${isOnline ? 'bg-green-50 border-green-200 text-green-600' : 'bg-red-50 border-red-200 text-red-600'}`}>
                 <div className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-green-500' : 'bg-red-500'}`}></div>
                 <span>{isOnline ? 'ONLINE' : 'OFFLINE'}</span>
@@ -422,8 +425,8 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
             </div>
         </section>
 
-        {/* RIGHT: TABS & CONTENT */}
-        <section className="flex-1 flex flex-col bg-[#f9fafb] overflow-hidden">
+        {/* RIGHT: TABS & CONTENT - CHANGED: bg-[#f9fafb] to bg-transparent */}
+        <section className="flex-1 flex flex-col bg-transparent overflow-hidden relative z-10">
             
             {/* History Ribbon */}
             <div className="h-14 bg-white border-b border-slate-100 flex items-center px-4 overflow-hidden shrink-0">
