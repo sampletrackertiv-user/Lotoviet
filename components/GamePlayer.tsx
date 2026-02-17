@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { TicketData, ChatMessage } from '../types';
+import { TicketData, ChatMessage, PlayerInfo } from '../types';
 import { TicketView } from './TicketView';
 import { ChatOverlay } from './ChatOverlay';
 import { Volume2, VolumeX, LogOut, MessageCircle, Grid3X3, Trophy, Crown, Star } from 'lucide-react';
@@ -39,7 +39,45 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
   const [currentRhyme, setCurrentRhyme] = useState<string>('');
   const [muted, setMuted] = useState(false);
   const [activeTab, setActiveTab] = useState<'TICKET' | 'CHAT'>('TICKET');
-  const [winners, setWinners] = useState<string[]>([]);
+  const [winners, setWinners] = useState<PlayerInfo[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+
+  // TTS Control
+  const ttsQueue = useRef<string[]>([]);
+  const isSpeaking = useRef(false);
+  const announcedWaiters = useRef<Set<string>>(new Set());
+  const announcedWinners = useRef<Set<string>>(new Set());
+  const lastRhymeRef = useRef<string>('');
+
+  const processTTSQueue = () => {
+    if (isSpeaking.current || ttsQueue.current.length === 0 || muted || !window.speechSynthesis) return;
+    
+    const text = ttsQueue.current.shift();
+    if (!text) return;
+
+    isSpeaking.current = true;
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = lang === 'vi' ? 'vi-VN' : 'en-US';
+    utterance.rate = 1.1; // Hơi nhanh một chút cho sôi nổi
+    
+    utterance.onend = () => {
+      isSpeaking.current = false;
+      setTimeout(processTTSQueue, 300);
+    };
+    
+    utterance.onerror = () => {
+      isSpeaking.current = false;
+      processTTSQueue();
+    };
+
+    window.speechSynthesis.speak(utterance);
+  };
+
+  const queueSpeech = (text: string) => {
+    if (muted) return;
+    ttsQueue.current.push(text);
+    processTTSQueue();
+  };
 
   useEffect(() => {
     const unsub = listenToConnectionStatus(() => {});
@@ -49,13 +87,21 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
   const handleJoin = async (e: React.FormEvent) => {
       e.preventDefault();
       if (!roomCode || !playerName) return;
+      
+      // Kích hoạt âm thanh bằng cách chạy một câu nói rỗng ngay khi tương tác người dùng
+      if (window.speechSynthesis) {
+          const silent = new SpeechSynthesisUtterance("");
+          window.speechSynthesis.speak(silent);
+      }
+
       setIsConnecting(true);
       const code = roomCode.trim().toUpperCase();
       try {
           const roomRef = ref(database, `rooms/${code}`);
           const snap = await get(roomRef);
           if (!snap.exists()) { alert("Không thấy phòng này!"); setIsConnecting(false); return; }
-          setRoomName(snap.val().roomName);
+          const roomData = snap.val();
+          setRoomName(roomData.roomName);
 
           const pRef = push(ref(database, `rooms/${code}/players`));
           const pId = pRef.key!;
@@ -63,29 +109,69 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
           await set(pRef, { id: pId, name: playerName, joinedAt: Date.now(), remaining: 4, isOnline: true });
           onDisconnect(pRef).update({ isOnline: false });
 
+          // Lắng nghe dữ liệu phòng
           onValue(roomRef, (s) => {
               const d = s.val();
-              if (d) { setHistory(d.history || []); setCurrentCall(d.currentNumber); setCurrentRhyme(d.currentRhyme); }
+              if (d) { 
+                  setHistory(d.history || []); 
+                  setCurrentCall(d.currentNumber); 
+                  if (d.currentRhyme && d.currentRhyme !== lastRhymeRef.current) {
+                      setCurrentRhyme(d.currentRhyme);
+                      lastRhymeRef.current = d.currentRhyme;
+                      queueSpeech(d.currentRhyme);
+                  }
+              }
           });
+
+          // Lắng nghe tin nhắn
           onValue(ref(database, `rooms/${code}/messages`), (s) => {
               const d = s.val();
               if (d) setMessages(Object.entries(d).map(([k, v]: any) => ({ ...v, id: k })).sort((a: any, b: any) => a.id.localeCompare(b.id)));
           });
+
+          // Lắng nghe danh sách người chơi để hô người đợi/thắng
           onValue(ref(database, `rooms/${code}/players`), (s) => {
               const d = s.val();
-              if (d) setWinners(Object.values(d).filter((p: any) => p.remaining === 0).map((p: any) => p.name));
-          });
-          setIsConnected(true);
-      } catch (e) { setIsConnecting(false); }
-  };
+              if (d) {
+                  const pList = Object.values(d) as PlayerInfo[];
+                  const currentWinners = pList.filter(p => p.remaining === 0);
+                  const currentWaiters = pList.filter(p => p.remaining === 1);
+                  
+                  // Hô người đợi
+                  currentWaiters.forEach(p => {
+                      if (!announcedWaiters.current.has(p.id)) {
+                          queueSpeech(`Cố lên! ${p.name} đang đợi kìa bà con ơi!`);
+                          announcedWaiters.current.add(p.id);
+                      }
+                  });
 
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+                  // Hô người thắng
+                  currentWinners.forEach(p => {
+                      if (!announcedWinners.current.has(p.id)) {
+                          queueSpeech(`Chúc mừng! ${p.name} đã thắng rồi! Trúng rồi bà con ơi!`);
+                          announcedWinners.current.add(p.id);
+                      }
+                  });
+
+                  setWinners(currentWinners);
+              }
+          });
+
+          setIsConnected(true);
+      } catch (e) { 
+          console.error(e);
+          setIsConnecting(false); 
+      }
+  };
 
   useEffect(() => {
       if (history.length > 0) {
           let changed = false;
           const newTicket = ticket.map(row => row.map(cell => {
-              if (cell.value && history.includes(cell.value) && !cell.marked) { changed = true; return { ...cell, marked: true }; }
+              if (cell.value && history.includes(cell.value) && !cell.marked) { 
+                  changed = true; 
+                  return { ...cell, marked: true }; 
+              }
               return cell;
           }));
           if (changed) {
@@ -95,7 +181,9 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
                   const rem = r.filter(c => c.value && !c.marked).length;
                   if (rem < minRem) minRem = rem;
               });
-              update(ref(database, `rooms/${roomCode.toUpperCase()}/players/${playerId}`), { remaining: minRem });
+              if (playerId && roomCode) {
+                  update(ref(database, `rooms/${roomCode.toUpperCase()}/players/${playerId}`), { remaining: minRem });
+              }
           }
       }
   }, [history]);
@@ -108,15 +196,18 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
                   <form onSubmit={handleJoin} className="space-y-4">
                       <input required className="w-full bg-slate-50 border border-slate-200 rounded-xl p-4 font-bold" placeholder="Tên bạn" value={playerName} onChange={e => setPlayerName(e.target.value)} />
                       <input required className="w-full bg-slate-50 border border-slate-200 rounded-xl p-4 font-bold uppercase" placeholder="Mã Phòng" maxLength={6} value={roomCode} onChange={e => setRoomCode(e.target.value)} />
-                      <button disabled={isConnecting} className="w-full bg-slate-900 text-white font-black py-4 rounded-xl shadow-lg">{isConnecting ? 'ĐANG VÀO...' : 'VÀO PHÒNG'}</button>
+                      <button disabled={isConnecting} className="w-full bg-slate-900 text-white font-black py-4 rounded-xl shadow-lg active:scale-95 transition-transform">
+                          {isConnecting ? 'ĐANG VÀO...' : 'VÀO PHÒNG'}
+                      </button>
                       <button type="button" onClick={onExit} className="w-full text-slate-400 font-bold text-xs uppercase py-2">Quay lại</button>
                   </form>
+                  <p className="mt-4 text-[10px] text-slate-400 text-center uppercase font-bold tracking-widest">Âm thanh sẽ được kích hoạt khi vào phòng</p>
               </div>
           </div>
       );
   }
 
-  const isPlayerWinner = winners.includes(playerName);
+  const winnerNames = winners.map(w => w.name);
 
   return (
     <div className="flex flex-col h-screen bg-[#f3f4f6] text-slate-800 overflow-hidden relative">
@@ -125,18 +216,25 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
             <Trophy className="text-yellow-900 shrink-0" />
             <div className="flex-1 overflow-hidden">
                 <p className="text-[10px] font-black text-yellow-900 uppercase leading-none">CÓ NGƯỜI THẮNG!</p>
-                <p className="text-sm font-black text-slate-900 truncate">{winners.join(', ')}</p>
+                <p className="text-sm font-black text-slate-900 truncate">{winnerNames.join(', ')}</p>
             </div>
          </div>
       )}
 
-      <nav className="h-14 px-4 bg-white flex justify-between items-center shrink-0 border-b border-slate-100 z-30">
+      <nav className="h-14 px-4 bg-white flex justify-between items-center shrink-0 border-b border-slate-100 z-30 shadow-sm">
          <div className="flex flex-col">
              <span className="text-[10px] text-slate-400 font-black uppercase leading-none">{roomName}</span>
              <span className="text-sm font-black text-slate-800 truncate max-w-[150px]">{playerName}</span>
          </div>
          <div className="flex gap-2">
-             <button onClick={() => setMuted(!muted)} className="p-2 text-slate-400">{muted ? <VolumeX size={20} /> : <Volume2 size={20} />}</button>
+             <button onClick={() => {
+                 const newMuted = !muted;
+                 setMuted(newMuted);
+                 if (newMuted) window.speechSynthesis.cancel();
+                 else processTTSQueue();
+             }} className={`p-2 rounded-full ${muted ? 'bg-red-50 text-red-500' : 'text-slate-400'}`}>
+                 {muted ? <VolumeX size={20} /> : <Volume2 size={20} />}
+             </button>
              <button onClick={onExit} className="p-2 text-slate-400"><LogOut size={20}/></button>
          </div>
       </nav>
@@ -164,7 +262,7 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
          </div>
       </div>
 
-      <div className="flex border-t border-slate-100 bg-white pb-safe z-40 fixed bottom-0 left-0 right-0 h-14">
+      <div className="flex border-t border-slate-100 bg-white pb-safe z-40 fixed bottom-0 left-0 right-0 h-14 shadow-[0_-4px_10px_rgba(0,0,0,0.05)]">
           <button onClick={() => setActiveTab('TICKET')} className={`flex-1 flex flex-col items-center justify-center gap-0.5 ${activeTab === 'TICKET' ? 'text-red-600' : 'text-slate-400'}`}>
               <Grid3X3 size={20} /> <span className="text-[9px] font-black uppercase">Vé Số</span>
           </button>
