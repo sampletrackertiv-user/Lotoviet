@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { TicketData, ChatMessage, PlayerInfo } from '../types';
 import { TicketView } from './TicketView';
 import { ChatOverlay } from './ChatOverlay';
-import { Volume2, VolumeX, LogOut, MessageCircle, Grid3X3, Trophy, Crown, Star } from 'lucide-react';
+import { Volume2, VolumeX, LogOut, MessageCircle, Grid3X3, Trophy, Crown, Users } from 'lucide-react';
 import { database, listenToConnectionStatus } from '../services/firebase';
 import { ref, set, onValue, push, onDisconnect, get, update } from "firebase/database";
 import { EmojiSystem } from './EmojiSystem';
@@ -38,8 +38,9 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
   const [currentCall, setCurrentCall] = useState<number | null>(null);
   const [currentRhyme, setCurrentRhyme] = useState<string>('');
   const [muted, setMuted] = useState(false);
-  const [activeTab, setActiveTab] = useState<'TICKET' | 'CHAT'>('TICKET');
+  const [activeTab, setActiveTab] = useState<'TICKET' | 'CHAT' | 'DASHBOARD'>('TICKET');
   const [winners, setWinners] = useState<PlayerInfo[]>([]);
+  const [players, setPlayers] = useState<PlayerInfo[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
 
   // TTS Control
@@ -51,25 +52,20 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
 
   const processTTSQueue = () => {
     if (isSpeaking.current || ttsQueue.current.length === 0 || muted || !window.speechSynthesis) return;
-    
     const text = ttsQueue.current.shift();
     if (!text) return;
-
     isSpeaking.current = true;
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = lang === 'vi' ? 'vi-VN' : 'en-US';
-    utterance.rate = 1.1; // Hơi nhanh một chút cho sôi nổi
-    
+    utterance.rate = 1.1;
     utterance.onend = () => {
       isSpeaking.current = false;
       setTimeout(processTTSQueue, 300);
     };
-    
     utterance.onerror = () => {
       isSpeaking.current = false;
       processTTSQueue();
     };
-
     window.speechSynthesis.speak(utterance);
   };
 
@@ -87,13 +83,10 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
   const handleJoin = async (e: React.FormEvent) => {
       e.preventDefault();
       if (!roomCode || !playerName) return;
-      
-      // Kích hoạt âm thanh bằng cách chạy một câu nói rỗng ngay khi tương tác người dùng
       if (window.speechSynthesis) {
           const silent = new SpeechSynthesisUtterance("");
           window.speechSynthesis.speak(silent);
       }
-
       setIsConnecting(true);
       const code = roomCode.trim().toUpperCase();
       try {
@@ -109,7 +102,6 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
           await set(pRef, { id: pId, name: playerName, joinedAt: Date.now(), remaining: 4, isOnline: true });
           onDisconnect(pRef).update({ isOnline: false });
 
-          // Lắng nghe dữ liệu phòng
           onValue(roomRef, (s) => {
               const d = s.val();
               if (d) { 
@@ -123,21 +115,19 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
               }
           });
 
-          // Lắng nghe tin nhắn
           onValue(ref(database, `rooms/${code}/messages`), (s) => {
               const d = s.val();
               if (d) setMessages(Object.entries(d).map(([k, v]: any) => ({ ...v, id: k })).sort((a: any, b: any) => a.id.localeCompare(b.id)));
           });
 
-          // Lắng nghe danh sách người chơi để hô người đợi/thắng
           onValue(ref(database, `rooms/${code}/players`), (s) => {
               const d = s.val();
               if (d) {
                   const pList = Object.values(d) as PlayerInfo[];
+                  setPlayers(pList);
                   const currentWinners = pList.filter(p => p.remaining === 0);
                   const currentWaiters = pList.filter(p => p.remaining === 1);
                   
-                  // Hô người đợi
                   currentWaiters.forEach(p => {
                       if (!announcedWaiters.current.has(p.id)) {
                           queueSpeech(`Cố lên! ${p.name} đang đợi kìa bà con ơi!`);
@@ -145,21 +135,17 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
                       }
                   });
 
-                  // Hô người thắng
                   currentWinners.forEach(p => {
                       if (!announcedWinners.current.has(p.id)) {
                           queueSpeech(`Chúc mừng! ${p.name} đã thắng rồi! Trúng rồi bà con ơi!`);
                           announcedWinners.current.add(p.id);
                       }
                   });
-
                   setWinners(currentWinners);
               }
           });
-
           setIsConnected(true);
       } catch (e) { 
-          console.error(e);
           setIsConnecting(false); 
       }
   };
@@ -207,8 +193,6 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
       );
   }
 
-  const winnerNames = winners.map(w => w.name);
-
   return (
     <div className="flex flex-col h-screen bg-[#f3f4f6] text-slate-800 overflow-hidden relative">
       {winners.length > 0 && (
@@ -216,7 +200,7 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
             <Trophy className="text-yellow-900 shrink-0" />
             <div className="flex-1 overflow-hidden">
                 <p className="text-[10px] font-black text-yellow-900 uppercase leading-none">CÓ NGƯỜI THẮNG!</p>
-                <p className="text-sm font-black text-slate-900 truncate">{winnerNames.join(', ')}</p>
+                <p className="text-sm font-black text-slate-900 truncate">{winners.map(w => w.name).join(', ')}</p>
             </div>
          </div>
       )}
@@ -242,6 +226,29 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
       <div className="flex-1 overflow-hidden flex flex-col relative">
          <EmojiSystem roomCode={roomCode.toUpperCase()} senderName={playerName} />
 
+         <div className={`flex-1 flex flex-col z-10 overflow-hidden ${activeTab === 'DASHBOARD' ? 'flex' : 'hidden'}`}>
+            <div className="p-4 overflow-y-auto space-y-2 h-full">
+                <div className="bg-white/50 p-2 rounded-xl mb-4 border border-slate-100">
+                    <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2 mb-2">Bạn cùng phòng ({players.length})</h3>
+                    <div className="space-y-2">
+                        {players.map(p => (
+                            <div key={p.id} className="p-3 bg-white rounded-xl border border-slate-100 flex justify-between items-center shadow-sm">
+                                <div className="flex items-center gap-3">
+                                    <div className={`w-2 h-2 rounded-full ${p.isOnline ? 'bg-green-500' : 'bg-slate-300'}`}></div>
+                                    <span className={`text-xs font-bold ${p.id === playerId ? 'text-red-600' : 'text-slate-700'}`}>
+                                        {p.name} {p.id === playerId && "(Bạn)"}
+                                    </span>
+                                </div>
+                                <span className={`px-2 py-1 rounded-lg text-[9px] font-black ${p.remaining === 1 ? 'bg-red-600 text-white animate-pulse' : 'bg-slate-50 text-slate-400 border'}`}>
+                                    {p.remaining === 0 ? '🏆 ĐÃ THẮNG' : `CÒN ${p.remaining} SỐ`}
+                                </span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            </div>
+         </div>
+
          <div className={`flex-1 flex flex-col items-center z-10 overflow-hidden pt-2 ${activeTab === 'TICKET' ? 'flex' : 'hidden'}`}>
             <div className="w-full max-w-lg px-3 mb-2">
                 <div className="bg-white rounded-2xl p-3 flex items-center gap-3 shadow-sm border border-slate-100">
@@ -251,7 +258,6 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
                     <p className="text-slate-700 text-[11px] font-bold italic line-clamp-2 leading-tight">"{currentRhyme || 'Chờ host gọi số...'}"</p>
                 </div>
             </div>
-
             <div className="w-full flex-1 overflow-y-auto flex flex-col items-center px-2 py-1 pb-20 gap-2 scale-[0.9] origin-top">
                 <TicketView ticket={ticket} interactive={false} />
             </div>
@@ -263,6 +269,9 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
       </div>
 
       <div className="flex border-t border-slate-100 bg-white pb-safe z-40 fixed bottom-0 left-0 right-0 h-14 shadow-[0_-4px_10px_rgba(0,0,0,0.05)]">
+          <button onClick={() => setActiveTab('DASHBOARD')} className={`flex-1 flex flex-col items-center justify-center gap-0.5 ${activeTab === 'DASHBOARD' ? 'text-red-600' : 'text-slate-400'}`}>
+              <Users size={20} /> <span className="text-[9px] font-black uppercase">Phòng</span>
+          </button>
           <button onClick={() => setActiveTab('TICKET')} className={`flex-1 flex flex-col items-center justify-center gap-0.5 ${activeTab === 'TICKET' ? 'text-red-600' : 'text-slate-400'}`}>
               <Grid3X3 size={20} /> <span className="text-[9px] font-black uppercase">Vé Số</span>
           </button>
