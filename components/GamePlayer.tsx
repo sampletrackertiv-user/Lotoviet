@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { TicketData, ChatMessage, PlayerInfo } from '../types';
 import { TicketView } from './TicketView';
 import { ChatOverlay } from './ChatOverlay';
-import { Volume2, VolumeX, LogOut, MessageCircle, Grid3X3, Trophy, Crown, Users } from 'lucide-react';
+import { Volume2, VolumeX, LogOut, MessageCircle, Grid3X3, Trophy, Users } from 'lucide-react';
 import { database, listenToConnectionStatus } from '../services/firebase';
 import { ref, set, onValue, push, onDisconnect, get, update } from "firebase/database";
 import { EmojiSystem } from './EmojiSystem';
@@ -43,7 +43,6 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
   const [players, setPlayers] = useState<PlayerInfo[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
 
-  // TTS Control
   const ttsQueue = useRef<string[]>([]);
   const isSpeaking = useRef(false);
   const announcedWaiters = useRef<Set<string>>(new Set());
@@ -137,7 +136,7 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
 
                   currentWinners.forEach(p => {
                       if (!announcedWinners.current.has(p.id)) {
-                          queueSpeech(`Chúc mừng! ${p.name} đã thắng rồi! Trúng rồi bà con ơi!`);
+                          queueSpeech(`Chúc mừng! ${p.name} đã kinh rồi! Trúng rồi bà con ơi!`);
                           announcedWinners.current.add(p.id);
                       }
                   });
@@ -172,7 +171,7 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
               }
           }
       }
-  }, [history]);
+  }, [history, ticket, playerId, roomCode]);
 
   if (!isConnected) {
       return (
@@ -199,7 +198,7 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
          <div className="absolute top-16 left-4 right-4 z-[60] bg-yellow-400 p-3 rounded-2xl shadow-xl flex items-center gap-3 border-2 border-white animate-bounce">
             <Trophy className="text-yellow-900 shrink-0" />
             <div className="flex-1 overflow-hidden">
-                <p className="text-[10px] font-black text-yellow-900 uppercase leading-none">CÓ NGƯỜI THẮNG!</p>
+                <p className="text-[10px] font-black text-yellow-900 uppercase leading-none">CÓ NGƯỜI KINH!</p>
                 <p className="text-sm font-black text-slate-900 truncate">{winners.map(w => w.name).join(', ')}</p>
             </div>
          </div>
@@ -227,25 +226,31 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
          <EmojiSystem roomCode={roomCode.toUpperCase()} senderName={playerName} />
 
          <div className={`flex-1 flex flex-col z-10 overflow-hidden ${activeTab === 'DASHBOARD' ? 'flex' : 'hidden'}`}>
-            <div className="p-4 overflow-y-auto space-y-2 h-full">
-                <div className="bg-white/50 p-2 rounded-xl mb-4 border border-slate-100">
-                    <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2 mb-2">Bạn cùng phòng ({players.length})</h3>
-                    <div className="space-y-2">
-                        {players.map(p => (
-                            <div key={p.id} className="p-3 bg-white rounded-xl border border-slate-100 flex justify-between items-center shadow-sm">
-                                <div className="flex items-center gap-3">
-                                    <div className={`w-2 h-2 rounded-full ${p.isOnline ? 'bg-green-500' : 'bg-slate-300'}`}></div>
-                                    <span className={`text-xs font-bold ${p.id === playerId ? 'text-red-600' : 'text-slate-700'}`}>
-                                        {p.name} {p.id === playerId && "(Bạn)"}
-                                    </span>
-                                </div>
-                                <span className={`px-2 py-1 rounded-lg text-[9px] font-black ${p.remaining === 1 ? 'bg-red-600 text-white animate-pulse' : 'bg-slate-50 text-slate-400 border'}`}>
-                                    {p.remaining === 0 ? '🏆 ĐÃ THẮNG' : `CÒN ${p.remaining} SỐ`}
+            <div className="p-4 overflow-y-auto space-y-2 h-full bg-slate-50">
+                <div className="flex items-center justify-between px-2 mb-2">
+                    <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Bạn cùng phòng ({players.length})</h3>
+                </div>
+                <div className="space-y-2">
+                    {players.map(p => (
+                        <div key={p.id} className="p-3 bg-white rounded-xl border border-slate-100 flex justify-between items-center shadow-sm">
+                            <div className="flex items-center gap-3">
+                                <div className={`w-2.5 h-2.5 rounded-full ${p.isOnline ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.5)]' : 'bg-slate-300'}`}></div>
+                                <span className={`text-sm font-bold ${p.id === playerId ? 'text-red-600' : 'text-slate-700'}`}>
+                                    {p.name} {p.id === playerId && "(Bạn)"}
                                 </span>
                             </div>
-                        ))}
-                    </div>
+                            <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black ${p.remaining === 0 ? 'bg-yellow-400 text-slate-900 shadow-sm' : p.remaining === 1 ? 'bg-red-600 text-white animate-pulse' : 'bg-slate-50 text-slate-400 border border-slate-100'}`}>
+                                {p.remaining === 0 ? '🏆 ĐÃ KINH' : `CÒN ${p.remaining} SỐ`}
+                            </span>
+                        </div>
+                    ))}
                 </div>
+                {players.length <= 1 && (
+                    <div className="flex flex-col items-center justify-center py-12 text-slate-400 italic">
+                        <Users size={40} className="mb-2 opacity-20" />
+                        <p className="text-xs">Đang chờ bạn bè tham gia...</p>
+                    </div>
+                )}
             </div>
          </div>
 

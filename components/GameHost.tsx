@@ -1,10 +1,10 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Play, Pause, Volume2, VolumeX, Copy, LogOut, Users, MessageCircle, Grid3X3, Trophy, Crown, Star, Sparkles } from 'lucide-react';
+import { Play, Pause, Volume2, VolumeX, Copy, LogOut, Users, MessageCircle, Grid3X3, Trophy, Crown, Star } from 'lucide-react';
 import { generateLotoRhyme } from '../services/geminiService';
 import { Language, PlayerInfo, TicketData, ChatMessage } from '../types';
 import { database, listenToConnectionStatus } from '../services/firebase';
-import { ref, set, onValue, update, onDisconnect, push } from "firebase/database";
+import { ref, set, onValue, update, push } from "firebase/database";
 import { ChatOverlay } from './ChatOverlay';
 import { TicketView } from './TicketView';
 import { EmojiSystem } from './EmojiSystem';
@@ -54,16 +54,42 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
   const [hostPlayerId, setHostPlayerId] = useState<string | null>(null);
   const [showCelebration, setShowCelebration] = useState(false);
 
-  const announcedWaiters = useRef<Set<string>>(new Set());
-  const announcedWinners = useRef<Set<string>>(new Set());
   const ttsQueue = useRef<string[]>([]);
   const isSpeaking = useRef(false);
-  const audioContextRef = useRef<AudioContext | null>(null);
+  const announcedWaiters = useRef<Set<string>>(new Set());
+  const announcedWinners = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     const unsubscribeStatus = listenToConnectionStatus(() => {});
     return () => unsubscribeStatus();
   }, []);
+
+  // Tự động đánh dấu vé cho Host khi có số mới
+  useEffect(() => {
+    if (hostTicket && calledNumbers.length > 0) {
+      let changed = false;
+      const newTicket = hostTicket.map(row => row.map(cell => {
+        if (cell.value && calledNumbers.includes(cell.value) && !cell.marked) {
+          changed = true;
+          return { ...cell, marked: true };
+        }
+        return cell;
+      }));
+      
+      if (changed) {
+        setHostTicket(newTicket);
+        // Tính toán số còn lại ít nhất trên 1 hàng để cập nhật tiến độ
+        let minRem = 4;
+        newTicket.forEach(r => {
+          const rem = r.filter(c => c.value && !c.marked).length;
+          if (rem < minRem) minRem = rem;
+        });
+        if (hostPlayerId && roomCode) {
+          update(ref(database, `rooms/${roomCode}/players/${hostPlayerId}`), { remaining: minRem });
+        }
+      }
+    }
+  }, [calledNumbers, hostTicket, hostPlayerId, roomCode]);
 
   const processTTSQueue = () => {
     if (isSpeaking.current || ttsQueue.current.length === 0 || muted) return;
@@ -101,7 +127,6 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
         const currentWinners = pList.filter(p => p.remaining === 0);
         const currentWaiters = pList.filter(p => p.remaining === 1);
 
-        // Hô người đang đợi
         currentWaiters.forEach(p => {
             if (!announcedWaiters.current.has(p.id)) {
                 queueSpeech(`Cố lên! ${p.name} đang đợi kìa bà con ơi!`);
@@ -109,10 +134,9 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
             }
         });
 
-        // Hô người thắng
         currentWinners.forEach(p => {
             if (!announcedWinners.current.has(p.id)) {
-                queueSpeech(`Chúc mừng! Chúc mừng! ${p.name} đã kinh rồi! Trúng rồi bà con ơi!`);
+                queueSpeech(`Chúc mừng! ${p.name} đã kinh rồi! Trúng rồi bà con ơi!`);
                 announcedWinners.current.add(p.id);
                 setIsAuto(false);
                 setShowCelebration(true);
@@ -154,6 +178,22 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
             update(ref(database, `rooms/${roomCode}`), { currentNumber: nextNum, currentRhyme: rhyme, history: newHistory });
         }
     }, 50);
+  };
+
+  const handleManualMark = (r: number, c: number, val: number) => {
+    if (!hostTicket) return;
+    const newTicket = [...hostTicket];
+    newTicket[r][c] = { ...newTicket[r][c], marked: !newTicket[r][c].marked };
+    setHostTicket(newTicket);
+    
+    let minRem = 4;
+    newTicket.forEach(row => {
+      const rem = row.filter(cell => cell.value && !cell.marked).length;
+      if (rem < minRem) minRem = rem;
+    });
+    if (hostPlayerId) {
+      update(ref(database, `rooms/${roomCode}/players/${hostPlayerId}`), { remaining: minRem });
+    }
   };
 
   useEffect(() => {
@@ -226,7 +266,7 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
         
         <section className="flex-none md:w-[35%] bg-white border-b md:border-r border-slate-100 flex flex-col items-center p-4 z-10">
             <div className="flex-1 flex flex-col items-center justify-center w-full">
-                <div onClick={isAuto ? () => setIsAuto(false) : drawNumber} className={`relative w-44 h-44 rounded-full bg-white shadow-2xl flex items-center justify-center border-8 border-slate-50 transition-all ${flash ? 'scale-110 border-red-200' : ''}`}>
+                <div onClick={isAuto ? () => setIsAuto(false) : drawNumber} className={`relative w-44 h-44 rounded-full bg-white shadow-2xl flex items-center justify-center border-8 border-slate-50 transition-all cursor-pointer ${flash ? 'scale-110 border-red-200' : ''}`}>
                     <span className={`text-[80px] leading-none font-black text-slate-800 ${isSpinning ? 'animate-pulse opacity-50' : ''}`}>{displayNumber || '--'}</span>
                 </div>
                 <div className="mt-4 text-center">
@@ -262,12 +302,14 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
                         <div className="h-full overflow-y-auto p-3 space-y-2">
                             {winners.length > 0 && <div className="p-3 bg-yellow-400 rounded-xl flex items-center gap-2 animate-pulse"><Trophy className="text-yellow-900" size={18}/> <span className="font-black text-yellow-900 text-sm">TRÚNG: {winners.map(w => w.name).join(', ')}</span></div>}
                             {players.map(p => (
-                                <div key={p.id} className="p-3 bg-slate-50 rounded-xl border border-slate-100 flex justify-between items-center">
+                                <div key={p.id} className="p-3 bg-slate-50 rounded-xl border border-slate-100 flex justify-between items-center shadow-sm">
                                     <div className="flex items-center gap-2">
                                         <div className={`w-2 h-2 rounded-full ${p.isOnline ? 'bg-green-500' : 'bg-slate-300'}`}></div>
-                                        <span className="text-xs font-bold">{p.name}</span>
+                                        <span className={`text-xs font-bold ${p.id === hostPlayerId ? 'text-red-600' : 'text-slate-700'}`}>{p.name} {p.id === hostPlayerId && "(Bạn)"}</span>
                                     </div>
-                                    <span className={`px-2 py-1 rounded-lg text-[10px] font-black ${p.remaining === 1 ? 'bg-red-600 text-white animate-bounce' : 'bg-white text-slate-400 border'}`}>CÒN {p.remaining} SỐ</span>
+                                    <span className={`px-2 py-1 rounded-lg text-[10px] font-black ${p.remaining === 0 ? 'bg-yellow-400 text-slate-900' : p.remaining === 1 ? 'bg-red-600 text-white animate-bounce' : 'bg-white text-slate-400 border'}`}>
+                                        {p.remaining === 0 ? 'ĐÃ KINH' : `CÒN ${p.remaining} SỐ`}
+                                    </span>
                                 </div>
                             ))}
                         </div>
@@ -282,7 +324,12 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
                                     setHostPlayerId(newRef.key);
                                     set(newRef, { id: newRef.key, name: `👑 ${hostName}`, remaining: 4, isOnline: true });
                                 }} className="bg-slate-900 text-white px-8 py-3 rounded-full font-black uppercase text-sm shadow-xl">Nhận Vé Chơi Cùng</button>
-                             ) : <TicketView ticket={hostTicket!} interactive={false} />}
+                             ) : (
+                                <div className="w-full flex flex-col items-center">
+                                    <p className="text-[10px] font-bold text-slate-400 uppercase mb-4">Vé của bạn (Sẽ tự động đánh dấu)</p>
+                                    <TicketView ticket={hostTicket!} interactive={true} onCellClick={handleManualMark} />
+                                </div>
+                             )}
                         </div>
                      )}
                  </div>
