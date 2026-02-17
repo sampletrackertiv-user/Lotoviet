@@ -1,6 +1,6 @@
+
 import React from 'react';
 import { TicketData } from '../types';
-import { Sparkles, QrCode, Flower } from 'lucide-react';
 
 interface TicketViewProps {
   ticket: TicketData;
@@ -9,61 +9,47 @@ interface TicketViewProps {
 }
 
 export const TicketView: React.FC<TicketViewProps> = ({ ticket, onCellClick, interactive }) => {
-  // Ticket is now 15 rows.
-  // We'll visually group them into blocks of 3 (standard ticket size) to make it readable.
-  
   return (
-    <div className="w-full max-w-2xl mx-auto relative group perspective-1000 mb-8">
-      {/* Background Glow */}
-      <div className="absolute inset-0 bg-gradient-to-b from-red-400 to-yellow-400 rounded-2xl blur-lg opacity-20 group-hover:opacity-30 transition-opacity duration-500"></div>
-      
-      <div className="relative bg-white rounded-2xl border-2 border-red-500 shadow-xl overflow-hidden">
-        {/* Header */}
-        <div className="bg-red-600 p-2 flex justify-between items-center px-4 shadow-sm sticky top-0 z-20">
-             <div className="flex gap-1">
-                 <div className="w-2 h-2 rounded-full bg-yellow-300"></div>
-                 <div className="w-2 h-2 rounded-full bg-yellow-300"></div>
-             </div>
-             <span className="text-[10px] text-yellow-100 font-bold uppercase tracking-widest">ĐẠI HỘI LÔ TÔ 2026</span>
+    <div className="w-full max-w-2xl mx-auto">
+      <div className="bg-white rounded-xl border-2 border-red-600 shadow-xl overflow-hidden flex flex-col">
+        {/* Header - Super Slim */}
+        <div className="bg-red-600 p-0.5 flex justify-center items-center">
+             <span className="text-[7px] text-yellow-200 font-black uppercase tracking-[0.4em]">Đại Hội Lô Tô Xuân 2026</span>
         </div>
         
-        <div className="p-3 bg-[url('https://www.transparenttextures.com/patterns/cream-paper.png')]">
-            
-            {/* The Grid */}
-            <div className="flex flex-col gap-1">
+        <div className="p-0.5 bg-[#fffdfa]">
+            <div className="flex flex-col gap-px">
                 {ticket.map((row, rowIndex) => (
                 <React.Fragment key={rowIndex}>
-                    {/* Visual separator every 3 rows to mimic separate tickets */}
+                    {/* Tiny Divider every 3 rows */}
                     {rowIndex > 0 && rowIndex % 3 === 0 && (
-                        <div className="h-6 flex items-center justify-center my-1 opacity-60">
-                            <div className="h-px bg-red-300 w-full dashed"></div>
-                            <span className="text-[8px] text-red-500 px-2 font-mono whitespace-nowrap bg-white/50 rounded">VÉ {Math.floor(rowIndex/3) + 1}</span>
-                            <div className="h-px bg-red-300 w-full dashed"></div>
+                        <div className="h-1 flex items-center justify-center">
+                            <div className="h-[0.5px] bg-red-100 w-full"></div>
                         </div>
                     )}
                     
-                    <div className="grid grid-cols-9 gap-1 h-10 sm:h-12">
+                    <div className="grid grid-cols-9 gap-px">
                         {row.map((cell, colIndex) => (
                         <div
                             key={`${rowIndex}-${colIndex}`}
                             onClick={() => {
-                            if (interactive && cell.value !== null && onCellClick) {
-                                onCellClick(rowIndex, colIndex, cell.value);
-                            }
+                                if (interactive && cell.value !== null && onCellClick) {
+                                    onCellClick(rowIndex, colIndex, cell.value);
+                                }
                             }}
                             className={`
-                            relative rounded-md flex items-center justify-center
-                            font-black text-sm sm:text-lg transition-all duration-200
+                            h-6 sm:h-8 flex items-center justify-center
+                            font-black text-[11px] sm:text-base rounded-sm
                             ${cell.value === null 
-                                ? 'bg-red-50/30' // Empty
-                                : 'cursor-pointer active:scale-95 border border-slate-100 shadow-sm'}
+                                ? 'bg-red-50/10' 
+                                : 'cursor-pointer border border-slate-50 transition-all active:scale-90'}
                             
                             ${!cell.marked && cell.value !== null 
                                 ? 'bg-white text-slate-800' 
                                 : ''}
                             
                             ${cell.marked && cell.value !== null 
-                                ? 'bg-red-500 text-white border-red-600 shadow-inner z-10' 
+                                ? 'bg-red-600 text-white border-red-700 shadow-inner scale-105 z-10' 
                                 : ''}
                             `}
                         >
@@ -74,9 +60,8 @@ export const TicketView: React.FC<TicketViewProps> = ({ ticket, onCellClick, int
                 </React.Fragment>
                 ))}
             </div>
-
-            <div className="mt-4 flex justify-center items-center">
-                <span className="text-[9px] text-red-300 font-bold uppercase tracking-widest">Chúc Bạn May Mắn</span>
+            <div className="mt-0.5 flex justify-center">
+                <span className="text-[6px] text-red-200 font-bold uppercase tracking-widest">LotoMaster AI - Chúc Mừng Năm Mới</span>
             </div>
         </div>
       </div>
