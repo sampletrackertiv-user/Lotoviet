@@ -81,19 +81,27 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
 
   const handleJoin = async (e: React.FormEvent) => {
       e.preventDefault();
-      if (!roomCode || !playerName) return;
+      const code = roomCode.trim().toUpperCase();
+      if (!code || !playerName.trim()) return;
+      
       if (window.speechSynthesis) {
           const silent = new SpeechSynthesisUtterance("");
           window.speechSynthesis.speak(silent);
       }
+      
       setIsConnecting(true);
-      const code = roomCode.trim().toUpperCase();
       try {
           const roomRef = ref(database, `rooms/${code}`);
           const snap = await get(roomRef);
-          if (!snap.exists()) { alert("Không thấy phòng này!"); setIsConnecting(false); return; }
+          if (!snap.exists()) { 
+              alert("Không thấy phòng này! Hãy kiểm tra lại mã phòng."); 
+              setIsConnecting(false); 
+              return; 
+          }
+          
           const roomData = snap.val();
           setRoomName(roomData.roomName);
+          setRoomCode(code); // Ensure uppercase
 
           const pRef = push(ref(database, `rooms/${code}/players`));
           const pId = pRef.key!;
@@ -101,6 +109,7 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
           await set(pRef, { id: pId, name: playerName, joinedAt: Date.now(), remaining: 4, isOnline: true });
           onDisconnect(pRef).update({ isOnline: false });
 
+          // Listener for room state
           onValue(roomRef, (s) => {
               const d = s.val();
               if (d) { 
@@ -114,16 +123,19 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
               }
           });
 
+          // Listener for messages
           onValue(ref(database, `rooms/${code}/messages`), (s) => {
               const d = s.val();
               if (d) setMessages(Object.entries(d).map(([k, v]: any) => ({ ...v, id: k })).sort((a: any, b: any) => a.id.localeCompare(b.id)));
           });
 
+          // Listener for players (Roommates)
           onValue(ref(database, `rooms/${code}/players`), (s) => {
               const d = s.val();
               if (d) {
                   const pList = Object.values(d) as PlayerInfo[];
                   setPlayers(pList);
+                  
                   const currentWinners = pList.filter(p => p.remaining === 0);
                   const currentWaiters = pList.filter(p => p.remaining === 1);
                   
@@ -141,25 +153,31 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
                       }
                   });
                   setWinners(currentWinners);
+              } else {
+                  setPlayers([]);
               }
           });
+          
           setIsConnected(true);
       } catch (e) { 
+          console.error("Join error:", e);
+          alert("Có lỗi xảy ra khi vào phòng. Vui lòng thử lại.");
           setIsConnecting(false); 
       }
   };
 
   useEffect(() => {
       if (history.length > 0) {
-          let changed = false;
+          let hasNewMark = false;
           const newTicket = ticket.map(row => row.map(cell => {
               if (cell.value && history.includes(cell.value) && !cell.marked) { 
-                  changed = true; 
+                  hasNewMark = true; 
                   return { ...cell, marked: true }; 
               }
               return cell;
           }));
-          if (changed) {
+
+          if (hasNewMark) {
               setTicket(newTicket);
               let minRem = 4;
               newTicket.forEach(r => {
@@ -177,16 +195,22 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
       return (
           <div className="flex flex-col items-center justify-center min-h-screen bg-[#f3f4f6] p-6">
               <div className="max-w-sm w-full bg-white p-8 rounded-3xl shadow-xl border border-slate-100">
-                  <h2 className="text-2xl font-black text-slate-800 text-center uppercase mb-6">Tham Gia Game</h2>
+                  <h2 className="text-2xl font-black text-slate-800 text-center uppercase mb-6 tracking-tight">Vào Cuộc Chơi</h2>
                   <form onSubmit={handleJoin} className="space-y-4">
-                      <input required className="w-full bg-slate-50 border border-slate-200 rounded-xl p-4 font-bold" placeholder="Tên bạn" value={playerName} onChange={e => setPlayerName(e.target.value)} />
-                      <input required className="w-full bg-slate-50 border border-slate-200 rounded-xl p-4 font-bold uppercase" placeholder="Mã Phòng" maxLength={6} value={roomCode} onChange={e => setRoomCode(e.target.value)} />
-                      <button disabled={isConnecting} className="w-full bg-slate-900 text-white font-black py-4 rounded-xl shadow-lg active:scale-95 transition-transform">
-                          {isConnecting ? 'ĐANG VÀO...' : 'VÀO PHÒNG'}
+                      <div className="space-y-1">
+                          <label className="text-[10px] font-black text-slate-400 uppercase ml-2">Tên của bạn</label>
+                          <input required className="w-full bg-slate-50 border border-slate-200 rounded-xl p-4 font-bold outline-none focus:ring-2 focus:ring-red-500 transition-all" placeholder="VD: Tèo" value={playerName} onChange={e => setPlayerName(e.target.value)} />
+                      </div>
+                      <div className="space-y-1">
+                          <label className="text-[10px] font-black text-slate-400 uppercase ml-2">Mã Phòng</label>
+                          <input required className="w-full bg-slate-50 border border-slate-200 rounded-xl p-4 font-bold uppercase outline-none focus:ring-2 focus:ring-red-500 transition-all" placeholder="VD: AB12CD" maxLength={6} value={roomCode} onChange={e => setRoomCode(e.target.value)} />
+                      </div>
+                      <button disabled={isConnecting} className="w-full bg-slate-900 text-white font-black py-4 rounded-xl shadow-lg active:scale-95 disabled:opacity-50 transition-all uppercase tracking-wider mt-2">
+                          {isConnecting ? 'Đang kết nối...' : 'VÀO PHÒNG'}
                       </button>
-                      <button type="button" onClick={onExit} className="w-full text-slate-400 font-bold text-xs uppercase py-2">Quay lại</button>
+                      <button type="button" onClick={onExit} className="w-full text-slate-400 font-bold text-xs uppercase py-2 hover:text-slate-600 transition-colors">Quay lại</button>
                   </form>
-                  <p className="mt-4 text-[10px] text-slate-400 text-center uppercase font-bold tracking-widest">Âm thanh sẽ được kích hoạt khi vào phòng</p>
+                  <p className="mt-6 text-[10px] text-slate-400 text-center uppercase font-bold tracking-widest leading-relaxed">Tiếng hò vè sẽ tự động kích hoạt<br/>khi bạn vào phòng thành công</p>
               </div>
           </div>
       );
@@ -215,72 +239,72 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({ onExit, lang }) => {
                  setMuted(newMuted);
                  if (newMuted) window.speechSynthesis.cancel();
                  else processTTSQueue();
-             }} className={`p-2 rounded-full ${muted ? 'bg-red-50 text-red-500' : 'text-slate-400'}`}>
+             }} className={`p-2 rounded-full transition-all ${muted ? 'bg-red-50 text-red-500' : 'text-slate-400 hover:bg-slate-50'}`}>
                  {muted ? <VolumeX size={20} /> : <Volume2 size={20} />}
              </button>
-             <button onClick={onExit} className="p-2 text-slate-400"><LogOut size={20}/></button>
+             <button onClick={onExit} className="p-2 text-slate-400 hover:text-red-500 transition-all"><LogOut size={20}/></button>
          </div>
       </nav>
 
       <div className="flex-1 overflow-hidden flex flex-col relative">
          <EmojiSystem roomCode={roomCode.toUpperCase()} senderName={playerName} />
 
-         <div className={`flex-1 flex flex-col z-10 overflow-hidden ${activeTab === 'DASHBOARD' ? 'flex' : 'hidden'}`}>
-            <div className="p-4 overflow-y-auto space-y-2 h-full bg-slate-50">
+         {/* Dashboard Tab */}
+         <div className={`flex-1 flex flex-col z-10 overflow-hidden bg-slate-50/50 ${activeTab === 'DASHBOARD' ? 'flex' : 'hidden'}`}>
+            <div className="p-4 overflow-y-auto space-y-2 h-full">
                 <div className="flex items-center justify-between px-2 mb-2">
                     <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Bạn cùng phòng ({players.length})</h3>
                 </div>
                 <div className="space-y-2">
                     {players.map(p => (
-                        <div key={p.id} className="p-3 bg-white rounded-xl border border-slate-100 flex justify-between items-center shadow-sm">
+                        <div key={p.id} className="p-3 bg-white rounded-xl border border-slate-100 flex justify-between items-center shadow-sm hover:border-red-100 transition-colors">
                             <div className="flex items-center gap-3">
                                 <div className={`w-2.5 h-2.5 rounded-full ${p.isOnline ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.5)]' : 'bg-slate-300'}`}></div>
                                 <span className={`text-sm font-bold ${p.id === playerId ? 'text-red-600' : 'text-slate-700'}`}>
                                     {p.name} {p.id === playerId && "(Bạn)"}
                                 </span>
                             </div>
-                            <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black ${p.remaining === 0 ? 'bg-yellow-400 text-slate-900 shadow-sm' : p.remaining === 1 ? 'bg-red-600 text-white animate-pulse' : 'bg-slate-50 text-slate-400 border border-slate-100'}`}>
+                            <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black shadow-sm ${p.remaining === 0 ? 'bg-yellow-400 text-slate-900' : p.remaining === 1 ? 'bg-red-600 text-white animate-pulse' : 'bg-slate-50 text-slate-400 border border-slate-100'}`}>
                                 {p.remaining === 0 ? '🏆 ĐÃ KINH' : `CÒN ${p.remaining} SỐ`}
                             </span>
                         </div>
                     ))}
                 </div>
-                {players.length <= 1 && (
-                    <div className="flex flex-col items-center justify-center py-12 text-slate-400 italic">
-                        <Users size={40} className="mb-2 opacity-20" />
-                        <p className="text-xs">Đang chờ bạn bè tham gia...</p>
-                    </div>
-                )}
             </div>
          </div>
 
+         {/* Ticket Tab */}
          <div className={`flex-1 flex flex-col items-center z-10 overflow-hidden pt-2 ${activeTab === 'TICKET' ? 'flex' : 'hidden'}`}>
             <div className="w-full max-w-lg px-3 mb-2">
                 <div className="bg-white rounded-2xl p-3 flex items-center gap-3 shadow-sm border border-slate-100">
                     <div className="w-10 h-10 rounded-xl bg-red-600 flex items-center justify-center text-white shrink-0 shadow-lg">
                         <span className="text-xl font-black">{currentCall || '--'}</span>
                     </div>
-                    <p className="text-slate-700 text-[11px] font-bold italic line-clamp-2 leading-tight">"{currentRhyme || 'Chờ host gọi số...'}"</p>
+                    <div className="flex flex-col">
+                        <span className="text-[8px] font-black text-slate-300 uppercase">Đang hò vè:</span>
+                        <p className="text-slate-700 text-[11px] font-bold italic line-clamp-2 leading-tight">"{currentRhyme || 'Chờ host gọi số...'}"</p>
+                    </div>
                 </div>
             </div>
-            <div className="w-full flex-1 overflow-y-auto flex flex-col items-center px-2 py-1 pb-20 gap-2 scale-[0.9] origin-top">
+            <div className="w-full flex-1 overflow-y-auto flex flex-col items-center px-2 py-1 pb-20 gap-2 scale-[0.9] md:scale-100 origin-top transition-transform">
                 <TicketView ticket={ticket} interactive={false} />
             </div>
          </div>
 
+         {/* Chat Tab */}
          <div className={`flex-1 flex flex-col relative z-10 ${activeTab === 'CHAT' ? 'flex' : 'hidden'}`}>
              <ChatOverlay messages={messages} onSendMessage={(text) => push(ref(database, `rooms/${roomCode.toUpperCase()}/messages`), { sender: playerName, text })} playerName={playerName} />
          </div>
       </div>
 
-      <div className="flex border-t border-slate-100 bg-white pb-safe z-40 fixed bottom-0 left-0 right-0 h-14 shadow-[0_-4px_10px_rgba(0,0,0,0.05)]">
-          <button onClick={() => setActiveTab('DASHBOARD')} className={`flex-1 flex flex-col items-center justify-center gap-0.5 ${activeTab === 'DASHBOARD' ? 'text-red-600' : 'text-slate-400'}`}>
+      <div className="flex border-t border-slate-100 bg-white pb-safe z-40 fixed bottom-0 left-0 right-0 h-14 shadow-[0_-4px_15px_rgba(0,0,0,0.08)]">
+          <button onClick={() => setActiveTab('DASHBOARD')} className={`flex-1 flex flex-col items-center justify-center gap-0.5 transition-colors ${activeTab === 'DASHBOARD' ? 'text-red-600' : 'text-slate-400'}`}>
               <Users size={20} /> <span className="text-[9px] font-black uppercase">Phòng</span>
           </button>
-          <button onClick={() => setActiveTab('TICKET')} className={`flex-1 flex flex-col items-center justify-center gap-0.5 ${activeTab === 'TICKET' ? 'text-red-600' : 'text-slate-400'}`}>
+          <button onClick={() => setActiveTab('TICKET')} className={`flex-1 flex flex-col items-center justify-center gap-0.5 transition-colors ${activeTab === 'TICKET' ? 'text-red-600' : 'text-slate-400'}`}>
               <Grid3X3 size={20} /> <span className="text-[9px] font-black uppercase">Vé Số</span>
           </button>
-          <button onClick={() => setActiveTab('CHAT')} className={`flex-1 flex flex-col items-center justify-center gap-0.5 ${activeTab === 'CHAT' ? 'text-red-600' : 'text-slate-400'}`}>
+          <button onClick={() => setActiveTab('CHAT')} className={`flex-1 flex flex-col items-center justify-center gap-0.5 transition-colors ${activeTab === 'CHAT' ? 'text-red-600' : 'text-slate-400'}`}>
               <MessageCircle size={20} /> <span className="text-[9px] font-black uppercase">Chat</span>
           </button>
       </div>

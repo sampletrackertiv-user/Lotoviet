@@ -64,29 +64,33 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
     return () => unsubscribeStatus();
   }, []);
 
-  // Tự động đánh dấu vé cho Host khi có số mới
+  // Sync Host Ticket with Called Numbers
   useEffect(() => {
-    if (hostTicket && calledNumbers.length > 0) {
-      let changed = false;
-      const newTicket = hostTicket.map(row => row.map(cell => {
+    if (!hostTicket) return;
+    
+    let hasNewMarks = false;
+    const newTicket = hostTicket.map(row => 
+      row.map(cell => {
         if (cell.value && calledNumbers.includes(cell.value) && !cell.marked) {
-          changed = true;
+          hasNewMarks = true;
           return { ...cell, marked: true };
         }
         return cell;
-      }));
+      })
+    );
+
+    if (hasNewMarks) {
+      setHostTicket(newTicket);
       
-      if (changed) {
-        setHostTicket(newTicket);
-        // Tính toán số còn lại ít nhất trên 1 hàng để cập nhật tiến độ
-        let minRem = 4;
-        newTicket.forEach(r => {
-          const rem = r.filter(c => c.value && !c.marked).length;
-          if (rem < minRem) minRem = rem;
-        });
-        if (hostPlayerId && roomCode) {
-          update(ref(database, `rooms/${roomCode}/players/${hostPlayerId}`), { remaining: minRem });
-        }
+      // Calculate remaining counts
+      let minRem = 4;
+      newTicket.forEach(row => {
+        const rem = row.filter(cell => cell.value && !cell.marked).length;
+        if (rem < minRem) minRem = rem;
+      });
+
+      if (hostPlayerId && roomCode) {
+        update(ref(database, `rooms/${roomCode}/players/${hostPlayerId}`), { remaining: minRem });
       }
     }
   }, [calledNumbers, hostTicket, hostPlayerId, roomCode]);
@@ -196,6 +200,16 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
     }
   };
 
+  const handleHostJoinGame = () => {
+    const ticket = generateHostTicket();
+    setHostTicket(ticket);
+    const newRef = push(ref(database, `rooms/${roomCode}/players`));
+    const pId = newRef.key;
+    setHostPlayerId(pId);
+    set(newRef, { id: pId, name: `👑 ${hostName || 'Host'}`, remaining: 4, isOnline: true });
+    setActiveTab('TICKET');
+  };
+
   useEffect(() => {
     let timer: any;
     if (isAuto && !isSpinning && winners.length === 0) {
@@ -207,13 +221,19 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
   if (setupStep) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-red-600 to-orange-500 flex items-center justify-center p-6">
-        <div className="bg-white rounded-3xl p-8 w-full max-w-md shadow-2xl">
-          <h2 className="text-2xl font-black text-slate-800 mb-6 text-center uppercase">Thiết Lập Phòng</h2>
+        <div className="bg-white rounded-3xl p-8 w-full max-w-md shadow-2xl border border-white/20">
+          <h2 className="text-2xl font-black text-slate-800 mb-6 text-center uppercase tracking-tight">Thiết Lập Phòng</h2>
           <div className="space-y-4">
-            <input className="w-full bg-slate-50 border border-slate-200 rounded-xl p-4 font-bold" placeholder="Tên Phòng (VD: Tết Nhà Mình)" value={roomName} onChange={e => setRoomName(e.target.value)} />
-            <input className="w-full bg-slate-50 border border-slate-200 rounded-xl p-4 font-bold" placeholder="Tên Bạn (Host)" value={hostName} onChange={e => setHostName(e.target.value)} />
-            <button onClick={initGame} disabled={!roomName.trim()} className="w-full bg-red-600 text-white font-bold py-4 rounded-xl shadow-lg active:scale-95 disabled:opacity-50 uppercase">Tạo Phòng Ngay</button>
-            <button onClick={onExit} className="w-full text-slate-400 font-bold text-xs uppercase py-2">Quay lại</button>
+            <div className="space-y-1">
+                <label className="text-[10px] font-black text-slate-400 uppercase ml-2">Tên Phòng</label>
+                <input className="w-full bg-slate-50 border border-slate-200 rounded-xl p-4 font-bold focus:ring-2 focus:ring-red-500 outline-none transition-all" placeholder="VD: Tết Nhà Mình" value={roomName} onChange={e => setRoomName(e.target.value)} />
+            </div>
+            <div className="space-y-1">
+                <label className="text-[10px] font-black text-slate-400 uppercase ml-2">Tên Của Bạn</label>
+                <input className="w-full bg-slate-50 border border-slate-200 rounded-xl p-4 font-bold focus:ring-2 focus:ring-red-500 outline-none transition-all" placeholder="VD: Anh Ba" value={hostName} onChange={e => setHostName(e.target.value)} />
+            </div>
+            <button onClick={initGame} disabled={!roomName.trim()} className="w-full bg-red-600 text-white font-black py-4 rounded-xl shadow-lg active:scale-95 disabled:opacity-50 uppercase tracking-wider mt-4">Tạo Phòng Ngay</button>
+            <button onClick={onExit} className="w-full text-slate-400 font-bold text-xs uppercase py-2 hover:text-slate-600 transition-colors">Quay lại</button>
           </div>
         </div>
       </div>
@@ -224,17 +244,9 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
     <div className="flex flex-col h-screen bg-[#f3f4f6] text-slate-800 overflow-hidden relative">
       {showCelebration && (
         <div className="absolute inset-0 z-[100] bg-black/80 flex flex-col items-center justify-center p-6 text-center animate-in fade-in duration-500">
-            <div className="absolute inset-0 pointer-events-none overflow-hidden">
-                {Array.from({length: 20}).map((_, i) => (
-                    <div key={i} className="absolute animate-bounce" style={{left: `${Math.random()*100}%`, top: `${Math.random()*100}%`, animationDelay: `${Math.random()*2}s`}}>
-                        <Star className="text-yellow-400" fill="currentColor" size={24} />
-                    </div>
-                ))}
-            </div>
             <Trophy size={120} className="text-yellow-400 mb-6 animate-bounce" />
             <h2 className="text-5xl font-black text-white mb-4 uppercase tracking-tighter">CÓ NGƯỜI KINH!</h2>
             <div className="bg-white/10 backdrop-blur-xl p-8 rounded-3xl border border-white/20">
-                <p className="text-2xl text-yellow-300 font-bold mb-2">Chúc mừng người chiến thắng:</p>
                 <div className="space-y-2">
                     {winners.map(w => (
                         <div key={w.id} className="text-4xl font-black text-white flex items-center justify-center gap-3">
@@ -247,35 +259,38 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
         </div>
       )}
 
-      <header className="h-14 px-4 flex justify-between items-center bg-white border-b border-slate-100 shrink-0 z-50">
+      <header className="h-14 px-4 flex justify-between items-center bg-white border-b border-slate-100 shrink-0 z-50 shadow-sm">
          <div className="flex items-center gap-3">
              <div className="flex flex-col">
-                 <span className="text-[10px] text-slate-400 font-bold uppercase leading-none">{roomName}</span>
+                 <span className="text-[10px] text-slate-400 font-black uppercase leading-none">{roomName}</span>
                  <span className="text-red-600 font-black text-sm tracking-tighter">{roomCode}</span>
              </div>
-             <button onClick={() => navigator.clipboard.writeText(roomCode)} className="p-1.5 text-slate-400"><Copy size={14}/></button>
+             <button onClick={() => {
+                 navigator.clipboard.writeText(roomCode);
+                 alert("Đã chép mã phòng!");
+             }} className="p-1.5 text-slate-400 hover:text-red-500 transition-colors"><Copy size={14}/></button>
          </div>
          <div className="flex items-center gap-2">
-             <button onClick={() => setMuted(!muted)} className={`w-9 h-9 flex items-center justify-center rounded-full ${muted ? 'bg-red-50 text-red-500' : 'bg-slate-50 text-slate-600'}`}>{muted ? <VolumeX size={18}/> : <Volume2 size={18}/>}</button>
-             <button onClick={onExit} className="bg-slate-100 text-slate-600 p-2 rounded-full"><LogOut size={18}/></button>
+             <button onClick={() => setMuted(!muted)} className={`w-9 h-9 flex items-center justify-center rounded-full transition-all ${muted ? 'bg-red-50 text-red-500' : 'bg-slate-50 text-slate-600'}`}>{muted ? <VolumeX size={18}/> : <Volume2 size={18}/>}</button>
+             <button onClick={onExit} className="bg-slate-100 text-slate-600 p-2 rounded-full hover:bg-red-50 hover:text-red-600 transition-all"><LogOut size={18}/></button>
          </div>
       </header>
 
       <main className="flex-1 flex flex-col md:flex-row overflow-hidden relative">
         <EmojiSystem roomCode={roomCode} senderName={`👑 ${hostName || 'Host'}`} />
         
-        <section className="flex-none md:w-[35%] bg-white border-b md:border-r border-slate-100 flex flex-col items-center p-4 z-10">
+        <section className="flex-none md:w-[35%] bg-white border-b md:border-r border-slate-100 flex flex-col items-center p-4 z-10 shadow-sm">
             <div className="flex-1 flex flex-col items-center justify-center w-full">
-                <div onClick={isAuto ? () => setIsAuto(false) : drawNumber} className={`relative w-44 h-44 rounded-full bg-white shadow-2xl flex items-center justify-center border-8 border-slate-50 transition-all cursor-pointer ${flash ? 'scale-110 border-red-200' : ''}`}>
-                    <span className={`text-[80px] leading-none font-black text-slate-800 ${isSpinning ? 'animate-pulse opacity-50' : ''}`}>{displayNumber || '--'}</span>
+                <div onClick={isAuto ? () => setIsAuto(false) : drawNumber} className={`relative w-40 h-40 md:w-48 md:h-48 rounded-full bg-white shadow-2xl flex items-center justify-center border-8 border-slate-50 transition-all cursor-pointer hover:border-red-50 active:scale-95 ${flash ? 'scale-110 border-red-200 shadow-red-200' : ''}`}>
+                    <span className={`text-[80px] md:text-[100px] leading-none font-black text-slate-800 ${isSpinning ? 'animate-pulse opacity-50' : ''}`}>{displayNumber || '--'}</span>
                 </div>
-                <div className="mt-4 text-center">
-                     <p className="text-xs text-slate-400 font-bold uppercase mb-1">Đang hô:</p>
-                     <h3 className="text-lg font-black text-red-600 px-4 line-clamp-2 leading-tight">{currentRhyme || "Chào mừng bạn!"}</h3>
+                <div className="mt-6 text-center max-w-[280px]">
+                     <p className="text-[10px] text-slate-400 font-black uppercase mb-1 tracking-widest">Đang hô vè:</p>
+                     <h3 className="text-lg font-black text-red-600 px-4 line-clamp-3 leading-tight italic">"{currentRhyme || "Nhấn nút để bắt đầu hò!"}"</h3>
                 </div>
             </div>
             <div className="w-full space-y-2 mt-4">
-                 <button onClick={() => setIsAuto(!isAuto)} className={`w-full py-4 rounded-2xl font-black text-sm uppercase flex items-center justify-center gap-2 shadow-lg transition-all ${isAuto ? 'bg-red-50 text-red-600 border border-red-200' : 'bg-slate-900 text-white'}`}>
+                 <button onClick={() => setIsAuto(!isAuto)} className={`w-full py-4 rounded-2xl font-black text-sm uppercase flex items-center justify-center gap-2 shadow-lg transition-all ${isAuto ? 'bg-red-50 text-red-600 border border-red-200' : 'bg-slate-900 text-white hover:bg-slate-800'}`}>
                     {isAuto ? <Pause size={20} fill="currentColor"/> : <Play size={20} fill="currentColor"/>}
                     {isAuto ? 'Dừng Tự Động' : 'Quay Tự Động'}
                  </button>
@@ -283,50 +298,62 @@ export const GameHost: React.FC<GameHostProps> = ({ onExit, lang }) => {
         </section>
 
         <section className="flex-1 flex flex-col overflow-hidden relative z-10">
-            <div className="h-10 bg-white border-b border-slate-100 flex items-center px-4 shrink-0 overflow-x-auto scrollbar-hide gap-1.5">
+            <div className="h-10 bg-white border-b border-slate-100 flex items-center px-4 shrink-0 overflow-x-auto scrollbar-hide gap-1.5 shadow-inner">
                  <span className="text-[9px] font-black text-slate-300 uppercase shrink-0">Lịch sử:</span>
                  {calledNumbers.map((num, i) => (
-                    <div key={i} className={`w-6 h-6 rounded-md flex items-center justify-center text-[10px] font-bold shrink-0 ${i === 0 ? 'bg-red-600 text-white' : 'bg-slate-100 text-slate-400'}`}>{num}</div>
+                    <div key={i} className={`w-6 h-6 rounded-md flex items-center justify-center text-[10px] font-bold shrink-0 shadow-sm ${i === 0 ? 'bg-red-600 text-white animate-bounce' : 'bg-slate-100 text-slate-400'}`}>{num}</div>
                  ))}
             </div>
 
             <div className="flex p-1.5 gap-1.5 bg-slate-50 shrink-0">
-                <button onClick={() => setActiveTab('DASHBOARD')} className={`flex-1 py-2.5 rounded-xl text-[10px] font-black uppercase flex items-center justify-center gap-1.5 ${activeTab === 'DASHBOARD' ? 'bg-white shadow-sm' : 'text-slate-400'}`}><Users size={14} /> Phòng ({players.length})</button>
-                <button onClick={() => setActiveTab('CHAT')} className={`flex-1 py-2.5 rounded-xl text-[10px] font-black uppercase flex items-center justify-center gap-1.5 ${activeTab === 'CHAT' ? 'bg-white shadow-sm' : 'text-slate-400'}`}><MessageCircle size={14} /> Chat</button>
-                <button onClick={() => setActiveTab('TICKET')} className={`flex-1 py-2.5 rounded-xl text-[10px] font-black uppercase flex items-center justify-center gap-1.5 ${activeTab === 'TICKET' ? 'bg-white shadow-sm' : 'text-slate-400'}`}><Grid3X3 size={14} /> Vé Chủ</button>
+                <button onClick={() => setActiveTab('DASHBOARD')} className={`flex-1 py-2.5 rounded-xl text-[10px] font-black uppercase flex items-center justify-center gap-1.5 transition-all ${activeTab === 'DASHBOARD' ? 'bg-white shadow-md text-red-600' : 'text-slate-400 hover:bg-slate-100'}`}><Users size={14} /> Phòng ({players.length})</button>
+                <button onClick={() => setActiveTab('CHAT')} className={`flex-1 py-2.5 rounded-xl text-[10px] font-black uppercase flex items-center justify-center gap-1.5 transition-all ${activeTab === 'CHAT' ? 'bg-white shadow-md text-red-600' : 'text-slate-400 hover:bg-slate-100'}`}><MessageCircle size={14} /> Chat</button>
+                <button onClick={() => setActiveTab('TICKET')} className={`flex-1 py-2.5 rounded-xl text-[10px] font-black uppercase flex items-center justify-center gap-1.5 transition-all ${activeTab === 'TICKET' ? 'bg-white shadow-md text-red-600' : 'text-slate-400 hover:bg-slate-100'}`}><Grid3X3 size={14} /> Vé Chủ</button>
             </div>
 
             <div className="flex-1 overflow-hidden p-2 relative">
-                 <div className="h-full bg-white rounded-2xl border border-slate-100 overflow-hidden shadow-inner">
+                 <div className="h-full bg-white rounded-2xl border border-slate-100 overflow-hidden shadow-sm flex flex-col">
                      {activeTab === 'DASHBOARD' && (
-                        <div className="h-full overflow-y-auto p-3 space-y-2">
-                            {winners.length > 0 && <div className="p-3 bg-yellow-400 rounded-xl flex items-center gap-2 animate-pulse"><Trophy className="text-yellow-900" size={18}/> <span className="font-black text-yellow-900 text-sm">TRÚNG: {winners.map(w => w.name).join(', ')}</span></div>}
-                            {players.map(p => (
-                                <div key={p.id} className="p-3 bg-slate-50 rounded-xl border border-slate-100 flex justify-between items-center shadow-sm">
-                                    <div className="flex items-center gap-2">
-                                        <div className={`w-2 h-2 rounded-full ${p.isOnline ? 'bg-green-500' : 'bg-slate-300'}`}></div>
-                                        <span className={`text-xs font-bold ${p.id === hostPlayerId ? 'text-red-600' : 'text-slate-700'}`}>{p.name} {p.id === hostPlayerId && "(Bạn)"}</span>
-                                    </div>
-                                    <span className={`px-2 py-1 rounded-lg text-[10px] font-black ${p.remaining === 0 ? 'bg-yellow-400 text-slate-900' : p.remaining === 1 ? 'bg-red-600 text-white animate-bounce' : 'bg-white text-slate-400 border'}`}>
-                                        {p.remaining === 0 ? 'ĐÃ KINH' : `CÒN ${p.remaining} SỐ`}
-                                    </span>
+                        <div className="h-full overflow-y-auto p-3 space-y-2 bg-slate-50/50">
+                            {winners.length > 0 && (
+                                <div className="p-3 bg-yellow-400 rounded-xl flex items-center gap-3 animate-pulse border-2 border-white shadow-lg">
+                                    <Trophy className="text-yellow-900" size={20}/> 
+                                    <span className="font-black text-yellow-900 text-xs uppercase">Người thắng: {winners.map(w => w.name).join(', ')}</span>
                                 </div>
-                            ))}
+                            )}
+                            <div className="space-y-2">
+                                {players.map(p => (
+                                    <div key={p.id} className="p-3 bg-white rounded-xl border border-slate-100 flex justify-between items-center shadow-sm hover:border-red-100 transition-colors">
+                                        <div className="flex items-center gap-3">
+                                            <div className={`w-2.5 h-2.5 rounded-full ${p.isOnline ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]' : 'bg-slate-300'}`}></div>
+                                            <span className={`text-sm font-bold ${p.id === hostPlayerId ? 'text-red-600' : 'text-slate-700'}`}>{p.name} {p.id === hostPlayerId && "(Bạn)"}</span>
+                                        </div>
+                                        <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black shadow-sm ${p.remaining === 0 ? 'bg-yellow-400 text-slate-900' : p.remaining === 1 ? 'bg-red-600 text-white animate-pulse' : 'bg-slate-50 text-slate-400 border border-slate-100'}`}>
+                                            {p.remaining === 0 ? 'ĐÃ KINH 🏆' : `CÒN ${p.remaining} SỐ`}
+                                        </span>
+                                    </div>
+                                ))}
+                                {players.length === 0 && <p className="text-center text-slate-400 text-xs py-10 font-medium italic">Đang đợi người chơi tham gia...</p>}
+                            </div>
                         </div>
                      )}
                      {activeTab === 'CHAT' && <ChatOverlay messages={messages} onSendMessage={(text) => push(ref(database, `rooms/${roomCode}/messages`), { sender: `👑 ${hostName || 'Host'}`, text })} playerName={`👑 ${hostName || 'Host'}`} />}
                      {activeTab === 'TICKET' && (
-                        <div className="h-full overflow-y-auto flex flex-col items-center py-4 px-2 scale-[0.9] origin-top">
+                        <div className="h-full overflow-y-auto flex flex-col items-center py-6 px-2 scale-[0.9] origin-top bg-slate-50/30">
                              {!hostPlayerId ? (
-                                <button onClick={() => {
-                                    const ticket = generateHostTicket(); setHostTicket(ticket);
-                                    const newRef = push(ref(database, `rooms/${roomCode}/players`));
-                                    setHostPlayerId(newRef.key);
-                                    set(newRef, { id: newRef.key, name: `👑 ${hostName}`, remaining: 4, isOnline: true });
-                                }} className="bg-slate-900 text-white px-8 py-3 rounded-full font-black uppercase text-sm shadow-xl">Nhận Vé Chơi Cùng</button>
+                                <div className="flex flex-col items-center gap-4 py-10">
+                                    <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center text-red-600">
+                                        <Grid3X3 size={32} />
+                                    </div>
+                                    <div className="text-center">
+                                        <p className="font-bold text-slate-800">Bạn chưa có vé!</p>
+                                        <p className="text-xs text-slate-500 max-w-[200px] mt-1">Vừa làm Host vừa chơi cùng bạn bè cho vui.</p>
+                                    </div>
+                                    <button onClick={handleHostJoinGame} className="bg-slate-900 text-white px-8 py-4 rounded-2xl font-black uppercase text-sm shadow-xl hover:bg-slate-800 active:scale-95 transition-all mt-2">Nhận Vé Chơi Cùng</button>
+                                </div>
                              ) : (
                                 <div className="w-full flex flex-col items-center">
-                                    <p className="text-[10px] font-bold text-slate-400 uppercase mb-4">Vé của bạn (Sẽ tự động đánh dấu)</p>
+                                    <p className="text-[10px] font-black text-slate-400 uppercase mb-4 tracking-[0.2em]">Vé Của Bạn (Tự động dò số)</p>
                                     <TicketView ticket={hostTicket!} interactive={true} onCellClick={handleManualMark} />
                                 </div>
                              )}
